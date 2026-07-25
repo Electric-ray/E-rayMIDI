@@ -1,0 +1,235 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1a1a2e"
+    android:fillViewport="true">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- 타이틀 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🎹 Nuked SC-55 for Android"
+        android:textSize="18sp"
+        android:textColor="#e0e0ff"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:paddingBottom="10dp"/>
+
+    <!-- SC-55 LCD (실제 하드웨어 LCD 컨트롤러 에뮬레이션 결과, 픽셀 단위로 동일) -->
+    <FrameLayout
+        android:id="@+id/lcdFrame"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#000000"
+        android:padding="4dp"
+        android:layout_marginBottom="12dp">
+
+        <com.example.nukedsc55.LcdView
+            android:id="@+id/ivLcd"
+            android:layout_width="match_parent"
+            android:layout_height="200dp" />
+    </FrameLayout>
+
+    <!-- 모델 선택 (숨김 - rom_sc55 폴더의 ROM으로 자동 실행) -->
+    <Spinner
+        android:id="@+id/spinnerModel"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:backgroundTint="#16213e"
+        android:layout_marginBottom="10dp"
+        android:visibility="gone"/>
+
+    <!-- ① 연결 방식 선택 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="① 연결 방식"
+        android:textColor="#8888bb"
+        android:textSize="12sp"
+        android:layout_marginBottom="4dp"/>
+
+    <RadioGroup
+        android:id="@+id/rgConnection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="14dp">
+
+        <RadioButton
+            android:id="@+id/rbConnRtp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📡 RTP-MIDI"
+            android:textColor="#e0e0ff"
+            android:checked="true"/>
+
+        <RadioButton
+            android:id="@+id/rbConnUsb"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🔌 USB 시리얼"
+            android:textColor="#e0e0ff"/>
+    </RadioGroup>
+
+    <!-- ② 재생 엔진 선택 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="② 재생 엔진"
+        android:textColor="#8888bb"
+        android:textSize="12sp"
+        android:layout_marginBottom="4dp"/>
+
+    <RadioGroup
+        android:id="@+id/rgEngine"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <RadioButton
+            android:id="@+id/rbEngineSc55"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎹 SC-55"
+            android:textColor="#e0e0ff"
+            android:checked="true"/>
+
+        <RadioButton
+            android:id="@+id/rbEngineSoundfont"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎵 SoundFont"
+            android:textColor="#e0e0ff"/>
+    </RadioGroup>
+
+    <!-- 사운드폰트 선택 (SoundFont 모드일 때만 표시) -->
+    <LinearLayout
+        android:id="@+id/layoutSoundFontPicker"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="14dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvSoundFontName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="선택된 사운드폰트 없음"
+            android:textColor="#aaaacc"
+            android:textSize="12sp"
+            android:fontFamily="monospace"/>
+
+        <Button
+            android:id="@+id/btnPickSoundFont"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="🎵 파일 선택"
+            android:textSize="11sp"
+            android:textColor="#aaaaff"
+            android:backgroundTint="#1a1a3e"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <!-- ▶ 연결 시작 버튼 -->
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="▶ 연결 시작"
+        android:textColor="#ffffff"
+        android:backgroundTint="#0f3460"/>
+
+    <!-- 정지 버튼 -->
+    <Button
+        android:id="@+id/btnStop"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="⏹  정지"
+        android:textColor="#ffffff"
+        android:backgroundTint="#6b0000"
+        android:layout_marginTop="6dp"
+        android:enabled="false"/>
+
+    <!-- 구분선 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333366"
+        android:layout_marginTop="14dp"
+        android:layout_marginBottom="10dp"/>
+
+    <!-- ROM 상태 -->
+    <LinearLayout
+        android:id="@+id/romStatusRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvRomStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="ROM 확인 중…"
+            android:textColor="#aaaacc"
+            android:textSize="12sp"
+            android:fontFamily="monospace"/>
+
+        <Button
+            android:id="@+id/btnRomHelp"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="❓ ROM 안내"
+            android:textSize="11sp"
+            android:textColor="#aaaaff"
+            android:backgroundTint="#1a1a3e"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <!-- 구분선 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333366"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp"/>
+
+    <!-- 상태 메시지 -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="대기 중…"
+        android:textColor="#00cc88"
+        android:textSize="13sp"
+        android:minLines="4"
+        android:fontFamily="monospace"/>
+
+    <!-- 버전 (하단) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="16dp"
+        android:text="2026 전기가오리 / 네이버카페 도스박물관"
+        android:textColor="#444466"
+        android:textSize="10sp" />
+
+</LinearLayout>
+</ScrollView>

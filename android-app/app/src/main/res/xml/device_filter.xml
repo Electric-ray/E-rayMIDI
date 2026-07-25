@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- USB device filter: accept CDC-ACM (ESP32 USB serial) -->
+<resources>
+    <usb-device class="2"  />   <!-- CDC -->
+    <usb-device class="0"  />   <!-- Composite / vendor -->
+    <usb-device class="255"/>   <!-- Vendor specific -->
+</resources>
