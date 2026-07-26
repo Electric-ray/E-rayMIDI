@@ -161,16 +161,20 @@ class MuntEngine(val ctx: Context) : IEngine {
     private val mt32SysexCache = mutableListOf<ByteArray>()
     private val mt32CacheLock  = Any()
 
-    // 진단용: 새 연결/새 곱 시작 때마다 처음 200개 메시지를 채널 단위로 그대로 로그에 남김.
-    // "특정 곱은 소리가 안 난다"의 원인이 (a) MIDI가 아예 안들어오는지 (b) 파트가 할당되지 않은
-    // 채널(예: MT-32 기본 관습상 미사용인 채널 1)로만 오는지를 이 로그로 직접 확인할 수 있다.
+    // 진단용: 이전에는 200개 캡을 걸어놓았다 — 그러면 세션 중 여러 곱을 거치면서 캐핑이 이미 소진되어,
+    // 정작 문제의 곱에서는 로그가 하나도 안 찍힐 수 있었다 ("MIDI가 안 온다"가 아니라
+    // "로그 창이 이미 닫혀있었다"일 수 있음). 세션 내내 계속 찍히도록 캐을 없애고,
+    // 대신 과도한 스팸을 막기 위해 시간 단위로만 약간 생략(2ms당 1개)한다.
     private var midiLogCount = 0
+    private var lastMidiLogMs = 0L
     fun resetMidiLogCounter() { midiLogCount = 0 }
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        if (midiLogCount < 200) {
+        val now = System.currentTimeMillis()
+        if (now - lastMidiLogMs >= 2) {
+            lastMidiLogMs = now
             midiLogCount++
             val hex = bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
             val st = bytes[0].toInt() and 0xFF
