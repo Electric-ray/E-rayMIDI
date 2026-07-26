@@ -87,6 +87,7 @@ class MuntEngine(val ctx: Context) : IEngine {
         val ctrl = File(ROM_DIR, CTRL_ROM).readBytes()
         val pcm  = File(ROM_DIR, PCM_ROM).readBytes()
         onStatus?.invoke("⏳ munt(MT-32) 초기화 중...")
+        resetMidiLogCounter()
         val ok = nativeInit(ctrl, pcm)
         if (!ok) { onStatus?.invoke("❌ munt 초기화 실패"); return false }
         // MuntBridge.cpp의 nativeInit()은 ROM 로드+synth open+AAudio 시작까지
@@ -160,9 +161,22 @@ class MuntEngine(val ctx: Context) : IEngine {
     private val mt32SysexCache = mutableListOf<ByteArray>()
     private val mt32CacheLock  = Any()
 
+    // 진단용: 새 연결/새 곱 시작 때마다 처음 200개 메시지를 채널 단위로 그대로 로그에 남김.
+    // "특정 곱은 소리가 안 난다"의 원인이 (a) MIDI가 아예 안들어오는지 (b) 파트가 할당되지 않은
+    // 채널(예: MT-32 기본 관습상 미사용인 채널 1)로만 오는지를 이 로그로 직접 확인할 수 있다.
+    private var midiLogCount = 0
+    fun resetMidiLogCounter() { midiLogCount = 0 }
+
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
+        if (midiLogCount < 200) {
+            midiLogCount++
+            val hex = bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+            val st = bytes[0].toInt() and 0xFF
+            val ch = if (st in 0x80..0xEF) (st and 0x0F) + 1 else -1
+            Log.i(TAG, "MIDI#$midiLogCount ch=$ch [$hex]")
+        }
         if (bytes[0] == 0xF0.toByte()) {
             if (bytes.size >= 4 && (bytes[3].toInt() and 0xFF) == 0x16) {
                 synchronized(mt32CacheLock) { mt32SysexCache.add(bytes.copyOf()) }
@@ -189,6 +203,7 @@ class MuntEngine(val ctx: Context) : IEngine {
     // hard=true → MT-32 Master Reset SysEx까지 재생. SC-55 경로의 GS Reset
     // 금지 정책과는 무관한, munt 전용 리셋 경로(MuntBridge.cpp)이다.
     override fun resetEngine(hard: Boolean) {
+        resetMidiLogCounter()
         nativeResetSynth()
         if (hard) replaySysexCache()
         onStatus?.invoke(if (hard) "🔄 MT-32 리셋 완료 — 게임 음악을 재시작하세요" else "🔇 All Notes/Sound Off")
