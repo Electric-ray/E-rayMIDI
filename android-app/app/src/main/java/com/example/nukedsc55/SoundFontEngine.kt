@@ -174,6 +174,14 @@ class SoundFontEngine(val ctx: Context) : IEngine {
 
     fun version(): String = nativeGetVersion()
 
+    // ── UI용 악기명 패널 텍스트 (SC-55 LCD를 대체하는 간단한 텍스트 표시)
+    fun getChannelPanelText(): String = buildString {
+        for (ch in 0..15) {
+            val name = runCatching { nativeGetChannelPresetName(ch) }.getOrDefault("---")
+            appendLine("CH${ch + 1}${if (ch == 9) "(Drum)" else ""}: $name")
+        }
+    }
+
     override fun getNativeSampleRate(): Int = nativeGetSampleRate()
 
     override fun resetEngine(hard: Boolean) {

@@ -48,6 +48,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var romStatusRow: LinearLayout
     private lateinit var lcdFrame:    android.view.View
     private lateinit var ivLcd:       LcdView
+    private lateinit var tvInstrumentPanel: TextView
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
@@ -85,6 +86,31 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         }
     }
 
+    // ── 악기명 패널 (MT-32/SoundFont용, SC-55 LCD보다 훨씬 가벼운 텍스트 폴링) ────
+    private var instrumentPanelRunning = false
+    private val INSTRUMENT_PANEL_INTERVAL_MS = 400L
+    private val instrumentPanelRunnable = object : Runnable {
+        override fun run() {
+            when (activeEngineType) {
+                EngineType.MUNT -> if (muntEngine.engineRunning) tvInstrumentPanel.text = muntEngine.getPartPanelText()
+                EngineType.SOUNDFONT -> if (sfEngine.engineRunning) tvInstrumentPanel.text = sfEngine.getChannelPanelText()
+                else -> {}
+            }
+            if (instrumentPanelRunning) uiHandler.postDelayed(this, INSTRUMENT_PANEL_INTERVAL_MS)
+        }
+    }
+
+    private fun startInstrumentPanel() {
+        if (instrumentPanelRunning) return
+        instrumentPanelRunning = true
+        uiHandler.post(instrumentPanelRunnable)
+    }
+
+    private fun stopInstrumentPanel() {
+        instrumentPanelRunning = false
+        uiHandler.removeCallbacks(instrumentPanelRunnable)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -111,6 +137,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         romStatusRow = findViewById(R.id.romStatusRow)
         lcdFrame    = findViewById(R.id.lcdFrame)
         ivLcd       = findViewById(R.id.ivLcd)
+        tvInstrumentPanel = findViewById(R.id.tvInstrumentPanel)
         // FIX (깜빡임): nativeGetLcdFrame()이 JNI AndroidBitmap_lockPixels/unlockPixels로
         // 비트맵 픽셀을 직접 쓰는데, 이런 native 측 픽셀 변경은 HWUI가
         // 텍스처 재업로드 여부를 판단하는 generation 카운터를 거치지 않아,
@@ -147,6 +174,8 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
         // LCD는 SC-55 전용 (munt/SoundFont는 실제 LCD 컨트롤러 에뮬레이션이 없음)
         lcdFrame.visibility = if (!isSoundFont && !isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        // 악기명 패널은 munt/SoundFont에서만 (SC-55는 진짜 LCD가 있으므로 불필요)
+        tvInstrumentPanel.visibility = if (isSoundFont || isMunt) android.view.View.VISIBLE else android.view.View.GONE
         // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()
@@ -337,6 +366,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
             }
             activeEngineType = EngineType.SOUNDFONT
+            startInstrumentPanel()
         } else if (useMunt) {
             if (!muntEngine.initEngine()) return
             if (useRtp) muntEngine.startRtp() else {
@@ -344,6 +374,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
             }
             activeEngineType = EngineType.MUNT
+            startInstrumentPanel()
         } else {
             if (!sc55Engine.initEngine()) return
             if (useRtp) sc55Engine.startRtp() else {
@@ -365,6 +396,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
 
     private fun stopAll() {
         stopLcdUpdates()
+        stopInstrumentPanel()
         when (activeEngineType) {
             EngineType.SC55 -> { sc55Engine.allNotesOff(); sc55Engine.stop() }
             EngineType.SOUNDFONT -> { sfEngine.allNotesOff(); sfEngine.stop() }
@@ -392,6 +424,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     override fun onDestroy() {
         super.onDestroy()
         stopLcdUpdates()
+        stopInstrumentPanel()
         lcdThread.quitSafely()
         if (activeEngineType != null) stopAll()
     }

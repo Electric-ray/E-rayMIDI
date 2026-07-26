@@ -133,11 +133,35 @@ class RtpMidiSession(
 
     fun stop() {
         running = false
+        // FIX (모드 전환 시 "제어 타임아웃" 재현): 이전에는 소켓만 close()하고 ESP32에게 BY(세션종료)를 보내지 않았다.
+        // ESP32(lathoub AppleMIDI)는 그러면 자신이 여전히 이전 세션에 연결되어 있다고 보고,
+        // 자체 타임아웃(수십초)이 지나기 전까지는 새 IN(초대) 요청을 받아주지 않아서,
+        // 빠른 엔진 재전환 시 "제어 타임아웃"이 나고 연결이 끊기는 것으로 확인됨.
+        // 해결: close() 전에 BY를 ctrl/data 포트 둘 다에 보내 ESP32가 즉시 세션을 해제하도록 함.
+        ctrlSock?.let { sendBy(it, BASE) }
+        dataSock?.let { sendBy(it, BASE + 1) }
         regListener?.let { runCatching { nsdMgr?.unregisterService(it) } }
         multicastLock?.release()
         wifiLock?.release()
         ctrlSock?.close()
         dataSock?.close()
+    }
+
+    // ── BY (End Session) 전송 ── sendInvite와 동일한 패킷 구조를 재사용
+    // (수신측은 이미 IN 구조를 파싱할 수 있으므로 안전하게 동일 포맷 사용).
+    // UDP 손실 대비 3회 전송.
+    private fun sendBy(sock: DatagramSocket, remotePort: Int) {
+        val bb = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
+        bb.put(MAGIC); bb.putShort(CMD_BY); bb.putInt(2)
+        bb.putInt(token.toInt()); bb.putInt(ssrc.toInt())
+        val pkt = bb.array()
+        repeat(3) {
+            runCatching {
+                sock.send(DatagramPacket(pkt, pkt.size, InetSocketAddress(HOST, remotePort)))
+            }
+            if (it < 2) Thread.sleep(5)
+        }
+        Log.i(TAG, "BY×3 전송 (port=$remotePort) — ESP32 세션 즉시 해제 요청")
     }
 
     // MuntEngine이 BY 이후 재연결을 기다릴 때 사용 (현재 미사용, 향후 확장용)

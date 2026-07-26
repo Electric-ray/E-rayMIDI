@@ -202,6 +202,21 @@ class MuntEngine(val ctx: Context) : IEngine {
 
     fun stats(): String = nativeGetStats()
 
+    // ── UI용 악기명 패널 텍스트 (SC-55 LCD를 대체하는 간단한 텍스트 표시)
+    // MT-32 관습: Part1-8 = MIDI 채널 2-9, Rhythm = 채널 10 (채널 1은 미사용)
+    fun getPartPanelText(): String {
+        val stats = nativeGetStats()
+        val namesLine = stats.lineSequence().firstOrNull { it.startsWith("names:") }
+            ?: return "악기 정보 대기 중…"
+        val names = namesLine.removePrefix("names:").split(",")
+        return buildString {
+            for (i in names.indices) {
+                val label = if (i < 8) "CH${i + 2} (Part${i + 1})" else "CH10 (Rhythm)"
+                appendLine("$label: ${names.getOrElse(i) { "---" }.trim()}")
+            }
+        }
+    }
+
     override fun stop() {
         stopRtp(); stopUsb()
         if (engineRunning) {

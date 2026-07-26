@@ -37,6 +37,21 @@
             android:layout_height="200dp" />
     </FrameLayout>
 
+    <!-- MT-32 / SoundFont 악기명 패널 (SC-55 LCD를 대체 — 이 두 엔진은 실제 LCD 컨트롤러 에뮬레이션이 없음) -->
+    <TextView
+        android:id="@+id/tvInstrumentPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#000000"
+        android:padding="8dp"
+        android:textColor="#00ff88"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:minLines="9"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone"
+        android:text="악기 정보 대기 중…"/>
+
     <!-- 모델 선택 (숨김 - rom_sc55 폴더의 ROM으로 자동 실행) -->
     <Spinner
         android:id="@+id/spinnerModel"
