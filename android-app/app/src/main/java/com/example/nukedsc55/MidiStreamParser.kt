@@ -1,10 +1,10 @@
-﻿package com.example.nukedsc55
+package com.example.nukedsc55
 
 /**
- * ?곗냽 MIDI 諛붿씠???ㅽ듃由????꾩꽦??硫붿떆吏 肄쒕갚
- * Running Status 吏?? SysEx 吏??(F0..F7)
- * USB-serial 38400bps 濡??ㅼ뼱?ㅻ뒗 raw MIDI 諛붿씠?몄슜
- * (munt-android?먯꽌 洹몃?濡??ы똿 ??寃利앸맂 援ы쁽)
+ * 연속 MIDI 바이트 스트림을 완성된 메시지로 콜백
+ * Running Status 지원, SysEx 지원(F0..F7)
+ * USB-serial 38400bps로 들어오는 raw MIDI 바이트용
+ * (munt-android에서 그대로 포팅 → 검증된 구현)
  */
 class MidiStreamParser(private val onMessage: (ByteArray) -> Unit) {
 
@@ -39,8 +39,17 @@ class MidiStreamParser(private val onMessage: (ByteArray) -> Unit) {
         }
 
         if (inSysEx) {
-            if (bufPos < buf.size) buf[bufPos++] = b.toByte()
-            return
+            // FIX (특정 곡에서 소리 안 나는 문제 대응): SysEx 중 0xF7 없이 상태바이트(0x80~0xEF)가
+            // 섞이면 손상/미종료된 SysEx로 보고 즉시 중단한다. 이전에는 0xF0/0xF7이 다시
+            // 오기 전까지 무조건 바이트를 계속 흡수해서, 전송 에러로 끝맺은 SysEx 뒤로는
+            // 그 곡이 끝날 때까지 모든 MIDI(Note On/Off포함)가 통째로 사라지는 버그가 있었음.
+            if (b and 0x80 != 0) {
+                inSysEx = false; bufPos = 0
+                // return 하지 않고 아래로 이어져 이 바이트를 새 메시지의 상태바이트로 재동기화
+            } else {
+                if (bufPos < buf.size) buf[bufPos++] = b.toByte()
+                return
+            }
         }
 
         if (b and 0x80 != 0) {
