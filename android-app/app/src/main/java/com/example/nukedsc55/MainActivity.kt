@@ -31,6 +31,11 @@ class MainActivity : AppCompatActivity() {
 // 폴링 스레드 사이의 위상이 자주 어긋나면서 프레임이 반복적으로 스킵되어
 // 화면이 깜빡이는 것으로 보이는 현상 완화를 위해 폴링 간격을 넉넉하게.
 private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
+        // munt-android 원본 GUI의 LED 색상 그대로 재사용
+        private const val LED_OFF     = 0xFF333355.toInt()
+        private const val LED_ON      = 0xFF00EE44.toInt()
+        private const val LED_RHY_OFF = 0xFF332222.toInt()
+        private const val LED_RHY_ON  = 0xFFEE2222.toInt()
     }
 
     private lateinit var rgConnection: RadioGroup
@@ -49,6 +54,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var lcdFrame:    android.view.View
     private lateinit var ivLcd:       LcdView
     private lateinit var tvInstrumentPanel: TextView
+    private lateinit var llMuntPanel: LinearLayout
+    private val muntLeds = arrayOfNulls<android.view.View>(9)
+    private val muntPatchNames = arrayOfNulls<TextView>(9)
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
@@ -92,7 +100,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private val instrumentPanelRunnable = object : Runnable {
         override fun run() {
             when (activeEngineType) {
-                EngineType.MUNT -> if (muntEngine.engineRunning) tvInstrumentPanel.text = muntEngine.getPartPanelText()
+                EngineType.MUNT -> if (muntEngine.engineRunning) updateMuntPanel()
                 EngineType.SOUNDFONT -> if (sfEngine.engineRunning) tvInstrumentPanel.text = sfEngine.getChannelPanelText()
                 else -> {}
             }
@@ -109,6 +117,61 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun stopInstrumentPanel() {
         instrumentPanelRunning = false
         uiHandler.removeCallbacks(instrumentPanelRunnable)
+    }
+
+    // ── MT-32 LED 패널 (munt-android 원본 GUI 재현) ────────────────────
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun buildMuntPanelViews() {
+        if (llMuntPanel.childCount > 0) return
+        for (i in 0..8) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { it.topMargin = dp(3) }
+            }
+            val led = android.view.View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).also { it.marginEnd = dp(8) }
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(LED_OFF)
+                }
+            }
+            val label = TextView(this).apply {
+                text = if (i < 8) "CH${i + 2}" else "CH10"
+                setTextColor(0xFF888888.toInt())
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            val patch = TextView(this).apply {
+                text = "---"
+                setTextColor(0xFF00FF88.toInt())
+                textSize = 12f
+                typeface = android.graphics.Typeface.MONOSPACE
+            }
+            row.addView(led); row.addView(label); row.addView(patch)
+            llMuntPanel.addView(row)
+            muntLeds[i] = led
+            muntPatchNames[i] = patch
+        }
+    }
+
+    private fun updateMuntPanel() {
+        val info = muntEngine.getPartInfo()
+        for (i in 0..8) {
+            val on = (info.states shr i) and 1L != 0L
+            val rhy = i == 8
+            val color = when {
+                on && rhy -> LED_RHY_ON
+                on        -> LED_ON
+                rhy       -> LED_RHY_OFF
+                else      -> LED_OFF
+            }
+            (muntLeds[i]?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
+            muntPatchNames[i]?.text = info.names.getOrElse(i) { "---" }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,6 +201,8 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         lcdFrame    = findViewById(R.id.lcdFrame)
         ivLcd       = findViewById(R.id.ivLcd)
         tvInstrumentPanel = findViewById(R.id.tvInstrumentPanel)
+        llMuntPanel = findViewById(R.id.llMuntPanel)
+        buildMuntPanelViews()
         // FIX (깜빡임): nativeGetLcdFrame()이 JNI AndroidBitmap_lockPixels/unlockPixels로
         // 비트맵 픽셀을 직접 쓰는데, 이런 native 측 픽셀 변경은 HWUI가
         // 텍스처 재업로드 여부를 판단하는 generation 카운터를 거치지 않아,
@@ -174,8 +239,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
         // LCD는 SC-55 전용 (munt/SoundFont는 실제 LCD 컨트롤러 에뮬레이션이 없음)
         lcdFrame.visibility = if (!isSoundFont && !isMunt) android.view.View.VISIBLE else android.view.View.GONE
-        // 악기명 패널은 munt/SoundFont에서만 (SC-55는 진짜 LCD가 있으므로 불필요)
-        tvInstrumentPanel.visibility = if (isSoundFont || isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        // 악기명 패널은 각 엔진별로 분리 (MUNT는 LED패널, SoundFont는 텍스트패널)
+        llMuntPanel.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        tvInstrumentPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
         // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()

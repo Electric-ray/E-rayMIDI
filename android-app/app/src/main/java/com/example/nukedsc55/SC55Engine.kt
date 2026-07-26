@@ -171,11 +171,16 @@ class SC55Engine(val ctx: Context) : IEngine {
     }
 
     override fun stopRtp() {
+        // FIX (엔진 전환/재연결 시 "제어 타임아웃"): 이전에는 bindProcessToNetwork(null)을 먼저 호출해
+        // 프로세스의 기본 네트워크 바인딩을 해제한 다음 rtpSession.stop()을 불렀다. 그러면
+        // rtpSession.stop() 안의 BY(세션종료) UDP 패킷이 ESP32 AP 인터페이스가 아닌 엉눵한 기본 라우트(또는 네트워크 없음)로
+        // 나가려하다 실패/손실될 수 있어, ESP32가 세션 종료를 못 받고 자체 타임아웃까지 새 연결을 거부하는
+        // 원인으로 추정됨. 해결: BY가 나가기 때까지(rtpSession.stop() 먼저) 네트워크 바인딩을 유지한다.
+        rtpSession?.stop(); rtpSession = null
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         netCallback?.let { try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {} }
         netCallback = null
         try { cm.bindProcessToNetwork(null) } catch (_: Exception) {}
-        rtpSession?.stop(); rtpSession = null
     }
 
     // ── USB-MIDI ─────────────────────────────────────────────────────────

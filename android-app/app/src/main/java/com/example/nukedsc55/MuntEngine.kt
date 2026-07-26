@@ -136,11 +136,13 @@ class MuntEngine(val ctx: Context) : IEngine {
     }
 
     override fun stopRtp() {
+        // FIX (엔진 전환/재연결 시 "제어 타임아웃"): rtpSession.stop()을 네트워크 언바인드 전에 먼저 호출해
+        // BY(세션종료) 패킷이 ESP32 AP 로 확실히 나가도록 보장한다 (SC55Engine과 동일한 이유).
+        rtpSession?.stop(); rtpSession = null
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         netCallback?.let { try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {} }
         netCallback = null
         try { cm.bindProcessToNetwork(null) } catch (_: Exception) {}
-        rtpSession?.stop(); rtpSession = null
     }
 
     // ── USB-MIDI ─────────────────────────────────────────────────────────
@@ -215,6 +217,20 @@ class MuntEngine(val ctx: Context) : IEngine {
                 appendLine("$label: ${names.getOrElse(i) { "---" }.trim()}")
             }
         }
+    }
+
+    // munt-android 원본 GUI(LED 및 패치명 9개 항목)를 재현하기 위한 데이터 ──
+    // partStates: 비트 i = 파트 i가 현재 음을 내고 있는지 여부 (nativeGetStats()의 "partStates:" 값)
+    // 이 값이 계속 0이면서도 MIDI가 계속 들어온다면 폴리포니 고갈/이상동작 진단에도 유용.
+    data class PartInfo(val states: Long, val names: List<String>)
+
+    fun getPartInfo(): PartInfo {
+        val stats = nativeGetStats()
+        val map = stats.lineSequence().filter { ':' in it }
+            .associate { it.substringBefore(':') to it.substringAfter(':') }
+        val states = map["partStates"]?.toLongOrNull() ?: 0L
+        val names = map["names"]?.split(",") ?: emptyList()
+        return PartInfo(states, names)
     }
 
     override fun stop() {

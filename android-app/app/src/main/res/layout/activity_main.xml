@@ -37,7 +37,18 @@
             android:layout_height="200dp" />
     </FrameLayout>
 
-    <!-- MT-32 / SoundFont 악기명 패널 (SC-55 LCD를 대체 — 이 두 엔진은 실제 LCD 컨트롤러 에뮬레이션이 없음) -->
+    <!-- MT-32 LED 패널 (munt-android 원본 GUI 재현 — 파트당 LED + 패치명, 코드에서 동적 생성) -->
+    <LinearLayout
+        android:id="@+id/llMuntPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#000000"
+        android:padding="8dp"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone"/>
+
+    <!-- SoundFont 악기명 패널 (SC-55 LCD를 대체 — 이 두 엔진은 실제 LCD 컨트롤러 에뮬레이션이 없음) -->
     <TextView
         android:id="@+id/tvInstrumentPanel"
         android:layout_width="match_parent"
