@@ -36,6 +36,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var rgConnection: RadioGroup
     private lateinit var rgEngine:     RadioGroup
     private lateinit var rbEngineSoundfont: RadioButton
+    private lateinit var rbEngineMunt: RadioButton
     private lateinit var layoutSoundFontPicker: LinearLayout
     private lateinit var tvSoundFontName: TextView
     private lateinit var btnPickSoundFont: Button
@@ -50,9 +51,10 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
+    private lateinit var muntEngine: MuntEngine
 
-    // 현재 연결을 시작한 엔진 (둘 중 하나만 동시에 돌릴 수 있음)
-    private enum class EngineType { SC55, SOUNDFONT }
+    // 현재 연결을 시작한 엔진 (셋 중 하나만 동시에 돌릴 수 있음)
+    private enum class EngineType { SC55, SOUNDFONT, MUNT }
     private var activeEngineType: EngineType? = null
 
     private val prefs by lazy { getSharedPreferences("nukedsc55_prefs", MODE_PRIVATE) }
@@ -91,10 +93,13 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         sc55Engine.onStatus = { msg -> status(msg) }
         sfEngine = SoundFontEngine(this)
         sfEngine.onStatus = { msg -> status(msg) }
+        muntEngine = MuntEngine(this)
+        muntEngine.onStatus = { msg -> status(msg) }
 
         rgConnection = findViewById(R.id.rgConnection)
         rgEngine     = findViewById(R.id.rgEngine)
         rbEngineSoundfont = findViewById(R.id.rbEngineSoundfont)
+        rbEngineMunt = findViewById(R.id.rbEngineMunt)
         layoutSoundFontPicker = findViewById(R.id.layoutSoundFontPicker)
         tvSoundFontName = findViewById(R.id.tvSoundFontName)
         btnPickSoundFont = findViewById(R.id.btnPickSoundFont)
@@ -138,10 +143,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     // ── 재생 엔진 선택 UI 반영 ───────────────────────────────────────────
     private fun onEngineSelectionChanged() {
         val isSoundFont = rbEngineSoundfont.isChecked
+        val isMunt = rbEngineMunt.isChecked
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        lcdFrame.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
+        // LCD는 SC-55 전용 (munt/SoundFont는 실제 LCD 컨트롤러 에뮬레이션이 없음)
+        lcdFrame.visibility = if (!isSoundFont && !isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()
+        else updateRomStatus()
     }
 
     // ── 사운드폰트 선택 ──────────────────────────────────────────────────
@@ -288,21 +297,23 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             tvRomStatus.text = "파일 접근 권한 없음"
             return
         }
-        val romDir = File(sc55Engine.ROM_DIR)
-        val needed = sc55Engine.getRomFileList()
+        val romDirPath = if (rbEngineMunt.isChecked) muntEngine.ROM_DIR else sc55Engine.ROM_DIR
+        val needed = if (rbEngineMunt.isChecked) muntEngine.getRomFileList() else sc55Engine.getRomFileList()
+        val romDir = File(romDirPath)
         if (needed.isEmpty()) { tvRomStatus.text = "ROM 목록 조회 중…"; return }
         val found   = needed.count { File(romDir, it).exists() }
         val missing = needed.filter { !File(romDir, it).exists() }
         tvRomStatus.text = if (found == needed.size)
-            "✅ ROM ${found}/${needed.size}개 확인\n${sc55Engine.ROM_DIR}"
+            "✅ ROM ${found}/${needed.size}개 확인\n$romDirPath"
         else
             "⚠️ ROM ${found}/${needed.size}개\n없음: ${missing.joinToString(", ")}"
     }
 
     private fun showRomHelp() {
+        val helpText = if (rbEngineMunt.isChecked) muntEngine.getRomHelpText() else sc55Engine.getRomHelpText()
         AlertDialog.Builder(this)
             .setTitle("ROM 파일 안내")
-            .setMessage(sc55Engine.getRomHelpText())
+            .setMessage(helpText)
             .setPositiveButton("확인", null)
             .show()
     }
@@ -310,6 +321,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     // ── 연결 시작 (①연결방식 + ②재생엔진 조합) ──────────────────────────
     private fun onConnectClicked() {
         val useSoundFont = rbEngineSoundfont.isChecked
+        val useMunt = rbEngineMunt.isChecked
         val useRtp = findViewById<RadioButton>(R.id.rbConnRtp).isChecked
 
         if (useSoundFont) {
@@ -325,6 +337,13 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
             }
             activeEngineType = EngineType.SOUNDFONT
+        } else if (useMunt) {
+            if (!muntEngine.initEngine()) return
+            if (useRtp) muntEngine.startRtp() else {
+                val ok = muntEngine.startUsb()
+                if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
+            }
+            activeEngineType = EngineType.MUNT
         } else {
             if (!sc55Engine.initEngine()) return
             if (useRtp) sc55Engine.startRtp() else {
@@ -349,6 +368,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         when (activeEngineType) {
             EngineType.SC55 -> { sc55Engine.allNotesOff(); sc55Engine.stop() }
             EngineType.SOUNDFONT -> { sfEngine.allNotesOff(); sfEngine.stop() }
+            EngineType.MUNT -> { muntEngine.allNotesOff(); muntEngine.stop() }
             null -> {}
         }
         activeEngineType = null

@@ -59,9 +59,12 @@ class MuntEngine(val ctx: Context) : IEngine {
     override var onStatus: ((String) -> Unit)? = null
     override var engineRunning = false
 
-    // ── ROM 파일 존재 확인 ────────────────────────────────────────────────
+    // ── ROM 파일 존재 확인 (SC55Engine.getRomFileList()와 동일한 형태로
+    //    MainActivity가 세 엔진을 동일하게 다룰 수 있게 함) ────────────────
+    fun getRomFileList(): List<String> = listOf(CTRL_ROM, PCM_ROM)
+
     fun getMissingRoms(): List<String> =
-        listOf(CTRL_ROM, PCM_ROM).filter { !File(ROM_DIR, it).exists() }
+        getRomFileList().filter { !File(ROM_DIR, it).exists() }
 
     fun getRomHelpText(): String = buildString {
         appendLine("📂 ROM 파일 경로:")

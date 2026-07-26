@@ -112,6 +112,14 @@
             android:layout_weight="1"
             android:text="🎵 SoundFont"
             android:textColor="#e0e0ff"/>
+
+        <RadioButton
+            android:id="@+id/rbEngineMunt"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎷 MT-32"
+            android:textColor="#e0e0ff"/>
     </RadioGroup>
 
     <!-- 사운드폰트 선택 (SoundFont 모드일 때만 표시) -->
