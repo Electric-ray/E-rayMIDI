@@ -5,7 +5,7 @@ import android.net.*
 import android.util.Log
 import java.io.File
 
-class SC55Engine(val ctx: Context) {
+class SC55Engine(val ctx: Context) : IEngine {
 
     companion object {
         private const val TAG = "SC55Engine"
@@ -37,13 +37,14 @@ class SC55Engine(val ctx: Context) {
     external fun nativeGetLcdFrame(bitmap: android.graphics.Bitmap): Boolean
     external fun nativeGetLcdWidth(): Int
     external fun nativeGetLcdHeight(): Int
+    external fun nativeGetSampleRate(): Int
 
     private var rtpSession: RtpMidiSession? = null
     private var usbMgr: UsbMidiManager? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
 
-    var onStatus: ((String) -> Unit)? = null
-    var engineRunning = false
+    override var onStatus: ((String) -> Unit)? = null
+    override var engineRunning = false
 
     // ── 진단용 카운터 (RTP vs USB에서 실제로 몇 개의 MIDI 메시지가 엔진까지
     //    도달하는지 1초마다 로그로 비교하기 위함 — LCD 파라미터 바 애니메이션이
@@ -132,7 +133,7 @@ class SC55Engine(val ctx: Context) {
     }
 
     // ── RTP-MIDI ─────────────────────────────────────────────────────────
-    fun startRtp() {
+    override fun startRtp() {
         stopUsb()
         startDiagLogger("RTP")
         val session = RtpMidiSession(
@@ -169,7 +170,7 @@ class SC55Engine(val ctx: Context) {
         }
     }
 
-    fun stopRtp() {
+    override fun stopRtp() {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         netCallback?.let { try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {} }
         netCallback = null
@@ -178,7 +179,7 @@ class SC55Engine(val ctx: Context) {
     }
 
     // ── USB-MIDI ─────────────────────────────────────────────────────────
-    fun startUsb(): Boolean {
+    override fun startUsb(): Boolean {
         stopRtp()
         startDiagLogger("USB")
         return UsbMidiManager(ctx, ::dispatchMidi).also { m ->
@@ -187,11 +188,11 @@ class SC55Engine(val ctx: Context) {
         }.connect()
     }
 
-    fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
+    override fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     private val dumpCounter = java.util.concurrent.atomic.AtomicInteger(0)
-    fun dispatchMidi(bytes: ByteArray) {
+    override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
         diagBump(diagCategory(bytes))
         // FIX (스트링/레거토 같은 음 재트리거 시 잔향 대응): Note On 이 들어왔는데
@@ -232,11 +233,21 @@ class SC55Engine(val ctx: Context) {
         }
     }
 
-    fun allNotesOff() {
+    override fun allNotesOff() {
         for (ch in 0..15) {
             nativeSendMidi((0xB0 or ch) or (123 shl 8))
             nativeSendMidi((0xB0 or ch) or (120 shl 8))
         }
+    }
+
+    // IEngine 공통 계약: getNativeSampleRate / resetEngine
+    override fun getNativeSampleRate(): Int = nativeGetSampleRate()
+
+    // SC-55mk2 경로에서는 자동/전환 시점의 GS Reset을 절대 걸지 않기로
+    // 확정되어 있다(리버브 과다 및 stuck note 재현됨 — 세 차례 시도 후 폐기).
+    // hard 플래그와 무관하게 항상 All Notes/Sound Off만 수행한다.
+    override fun resetEngine(hard: Boolean) {
+        allNotesOff()
     }
 
     // ── 서스테인(CC64) 워치독 ──────────────────────────────────────────
@@ -339,7 +350,7 @@ class SC55Engine(val ctx: Context) {
         }.also { it.isDaemon = true; it.start() }
     }
 
-    fun stop() {
+    override fun stop() {
         stopRtp(); stopUsb()
         if (engineRunning) {
             nativeStop(); nativeTerm()

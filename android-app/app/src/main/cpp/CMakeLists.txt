@@ -108,3 +108,74 @@ target_link_libraries(soundfont-jni
     ${log-lib}
     ${aaudio-lib}
 )
+
+# ---------------------------------------------------------------------------
+# munt(mt32emu) — MT-32/CM-32L 신시사이저 코어 + JNI 공유 라이브러리
+# munt-android에서 이식(통합작업순서.md Phase 2). nuked-sc55-jni /
+# soundfont-jni와 완전히 독립적인 세 번째 .so — 심볼 충돌 없이 나란히
+# 빌드/링크된다. 소스 목록은 munt-android 원본 CMakeLists.txt와 동일
+# (SamplerateAdapter/SoxrAdapter는 외부 라이브러리(soxr/libsamplerate)가
+# 필요해 원본에서도 빌드 대상에서 제외되어 있었음 — 내부 리샘플러만 사용).
+# ---------------------------------------------------------------------------
+set(MT32EMU_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/munt/mt32emu)
+
+set(MT32EMU_SRCS
+    ${MT32EMU_ROOT}/Analog.cpp
+    ${MT32EMU_ROOT}/BReverbModel.cpp
+    ${MT32EMU_ROOT}/Display.cpp
+    ${MT32EMU_ROOT}/File.cpp
+    ${MT32EMU_ROOT}/FileStream.cpp
+    ${MT32EMU_ROOT}/LA32FloatWaveGenerator.cpp
+    ${MT32EMU_ROOT}/LA32Ramp.cpp
+    ${MT32EMU_ROOT}/LA32WaveGenerator.cpp
+    ${MT32EMU_ROOT}/MidiStreamParser.cpp
+    ${MT32EMU_ROOT}/Part.cpp
+    ${MT32EMU_ROOT}/Partial.cpp
+    ${MT32EMU_ROOT}/PartialManager.cpp
+    ${MT32EMU_ROOT}/Poly.cpp
+    ${MT32EMU_ROOT}/ROMInfo.cpp
+    ${MT32EMU_ROOT}/SampleRateConverter.cpp
+    ${MT32EMU_ROOT}/Synth.cpp
+    ${MT32EMU_ROOT}/Tables.cpp
+    ${MT32EMU_ROOT}/TVA.cpp
+    ${MT32EMU_ROOT}/TVF.cpp
+    ${MT32EMU_ROOT}/TVP.cpp
+    ${MT32EMU_ROOT}/VersionTagging.cpp
+    ${MT32EMU_ROOT}/sha1/sha1.cpp
+    ${MT32EMU_ROOT}/srchelper/InternalResampler.cpp
+    ${MT32EMU_ROOT}/srchelper/srctools/src/FIRResampler.cpp
+    ${MT32EMU_ROOT}/srchelper/srctools/src/IIR2xResampler.cpp
+    ${MT32EMU_ROOT}/srchelper/srctools/src/LinearResampler.cpp
+    ${MT32EMU_ROOT}/srchelper/srctools/src/ResamplerModel.cpp
+    ${MT32EMU_ROOT}/srchelper/srctools/src/SincResampler.cpp
+)
+
+set(MT32EMU_DEFINES
+    MT32EMU_EXPORTS_TYPE=0
+    MT32EMU_WITH_INTERNAL_RESAMPLER=1
+)
+
+add_library(mt32emu STATIC ${MT32EMU_SRCS})
+
+target_include_directories(mt32emu PUBLIC
+    ${MT32EMU_ROOT}
+    ${MT32EMU_ROOT}/sha1
+    ${MT32EMU_ROOT}/srchelper
+    ${MT32EMU_ROOT}/srchelper/srctools/include
+)
+
+target_compile_definitions(mt32emu PRIVATE ${MT32EMU_DEFINES})
+
+add_library(
+    munt-jni
+    SHARED
+    MuntBridge.cpp
+)
+
+target_compile_definitions(munt-jni PRIVATE ${MT32EMU_DEFINES})
+
+target_link_libraries(munt-jni
+    mt32emu
+    ${log-lib}
+    ${aaudio-lib}
+)

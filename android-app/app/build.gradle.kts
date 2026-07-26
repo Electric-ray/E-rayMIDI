@@ -9,17 +9,17 @@ android {
 
     defaultConfig {
         applicationId   = "com.example.nukedsc55"
-        minSdk          = 29       // Android 10 ??LG Velvet 기�???
+        minSdk          = 29       // Android 10 — LG Velvet 기본값
         targetSdk       = 36
         versionCode     = 1
         versionName     = "1.0"
 
-        // 검?�된 NDK 버전
+        // 검증된 NDK 버전
         ndkVersion = "28.2.13676358"
 
         ndk {
-            abiFilters += listOf("arm64-v8a")   // LG Velvet = arm64 ?�용
-            // ?�요 ??"armeabi-v7a" 추�? 가??
+            abiFilters += listOf("arm64-v8a")   // LG Velvet = arm64 전용
+            // 필요 시 "armeabi-v7a" 추가 가능
         }
 
         externalNativeBuild {

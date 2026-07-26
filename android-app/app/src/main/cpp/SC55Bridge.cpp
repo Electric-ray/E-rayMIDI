@@ -962,4 +962,12 @@ Java_com_example_nukedsc55_SC55Engine_nativeGetVersion(JNIEnv* env, jobject)
     return env->NewStringUTF("Nuked SC-55 for Android v6.12 (shorter watchdog timeouts + robustness, longer LCD quiescence window)");
 }
 
+// IEngine 공통 계약용 신규 accessor (통합작업순서.md Phase 1) — 엔진 전환 시
+// AAudio 스트림을 이 엔진의 진짜 네이티브 레이트로 열 수 있도록 노출.
+JNIEXPORT jint JNICALL
+Java_com_example_nukedsc55_SC55Engine_nativeGetSampleRate(JNIEnv*, jobject)
+{
+    return (jint)s_scActualRate;
+}
+
 } // extern "C"

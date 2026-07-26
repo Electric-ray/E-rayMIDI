@@ -73,6 +73,8 @@ static constexpr float    kDefaultGainDb = -6.0f;
 // 채널별 현재 프로그램(악기) 번호 캐시 — 드럼채널(9) 여부 판단 및 상태 조회용
 static int s_channelProgram[16] = {0};
 static int s_channelBank[16]    = {0};
+// IEngine 공통 계약용: nativeInit에서 AAudio가 실제로 열어준 레이트를 기억해둘 (TSF는 고정 네이티브 레이트가 없으므로 디바이스가 부여한 값을 그대로 보고한다).
+static std::atomic<int> s_actualSampleRate{44100};
 
 static void applyDefaultChannelSetup() {
     // GM 기본값: 채널 10(0-idx 9)은 드럼킷(뱅크128), 나머지는 뱅크0/프리셋0.
@@ -254,6 +256,7 @@ Java_com_example_nukedsc55_SoundFontEngine_nativeInit(JNIEnv* env, jobject, jstr
     }
 
     int32_t actualRate = AAudioStream_getSampleRate(s_stream);
+    s_actualSampleRate.store(actualRate);
     tsf_set_output(s_tsf, TSF_STEREO_INTERLEAVED, actualRate, kDefaultGainDb);
     applyDefaultChannelSetup();
 
@@ -355,6 +358,13 @@ JNIEXPORT jstring JNICALL
 Java_com_example_nukedsc55_SoundFontEngine_nativeGetVersion(JNIEnv* env, jobject)
 {
     return env->NewStringUTF("TinySoundFont bridge v1.1 (separate MIDI thread, -6dB default gain)");
+}
+
+// IEngine 공통 계약용 accessor (통합작업순서.md Phase 1)
+JNIEXPORT jint JNICALL
+Java_com_example_nukedsc55_SoundFontEngine_nativeGetSampleRate(JNIEnv*, jobject)
+{
+    return (jint)s_actualSampleRate.load();
 }
 
 } // extern "C"

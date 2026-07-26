@@ -16,7 +16,7 @@ import java.io.File
  * 경계 마커 처리, DT1 체크섬 검증, WifiLock 등)을 하나도 건드리지 않고
  * 그대로 물려받는다.
  */
-class SoundFontEngine(val ctx: Context) {
+class SoundFontEngine(val ctx: Context) : IEngine {
 
     companion object {
         private const val TAG = "SoundFontEngine"
@@ -41,13 +41,14 @@ class SoundFontEngine(val ctx: Context) {
     external fun nativeGetPresetCount(): Int
     external fun nativeGetChannelPresetName(channel: Int): String
     external fun nativeGetVersion(): String
+    external fun nativeGetSampleRate(): Int
 
     private var rtpSession: RtpMidiSession? = null
     private var usbMgr: UsbMidiManager? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
 
-    var onStatus: ((String) -> Unit)? = null
-    var engineRunning = false
+    override var onStatus: ((String) -> Unit)? = null
+    override var engineRunning = false
 
     // ── 사운드폰트 파일 유틸 ─────────────────────────────────────────────
     fun getSoundFontFileList(): List<File> {
@@ -76,7 +77,7 @@ class SoundFontEngine(val ctx: Context) {
     }
 
     // ── RTP-MIDI (SC55Engine과 동일한 구조) ───────────────────────────────
-    fun startRtp() {
+    override fun startRtp() {
         stopUsb()
         val session = RtpMidiSession(
             ctx           = ctx,
@@ -112,7 +113,7 @@ class SoundFontEngine(val ctx: Context) {
         }
     }
 
-    fun stopRtp() {
+    override fun stopRtp() {
         val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         netCallback?.let { try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {} }
         netCallback = null
@@ -121,7 +122,7 @@ class SoundFontEngine(val ctx: Context) {
     }
 
     // ── USB-MIDI ─────────────────────────────────────────────────────────
-    fun startUsb(): Boolean {
+    override fun startUsb(): Boolean {
         stopRtp()
         return UsbMidiManager(ctx, ::dispatchMidi).also { m ->
             m.onStatus = { msg -> onStatus?.invoke(msg) }
@@ -129,10 +130,10 @@ class SoundFontEngine(val ctx: Context) {
         }.connect()
     }
 
-    fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
+    override fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
-    fun dispatchMidi(bytes: ByteArray) {
+    override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
         // FIX (스트링/레거토 같은 음 재트리거 시 잔향 대응): SC55Engine과 동일한 근거.
         // 같은 (채널,노트)이 이미 켜져있다고 추적되는데 새 Note On이 들어오면,
@@ -164,7 +165,7 @@ class SoundFontEngine(val ctx: Context) {
         }
     }
 
-    fun allNotesOff() {
+    override fun allNotesOff() {
         for (ch in 0..15) {
             nativeSendMidi((0xB0 or ch) or (123 shl 8))
             nativeSendMidi((0xB0 or ch) or (120 shl 8))
@@ -172,6 +173,12 @@ class SoundFontEngine(val ctx: Context) {
     }
 
     fun version(): String = nativeGetVersion()
+
+    override fun getNativeSampleRate(): Int = nativeGetSampleRate()
+
+    override fun resetEngine(hard: Boolean) {
+        allNotesOff()
+    }
 
     // ── 서스테인(CC64) 워치독 — SC55Engine과 동일한 근거로 필요 ────────────
     // RTP는 UDP라 패킷이 통째로 유실될 수 있고, 하필 CC64=0(페달 해제)이 유실되면
@@ -262,7 +269,7 @@ class SoundFontEngine(val ctx: Context) {
         }.also { it.isDaemon = true; it.start() }
     }
 
-    fun stop() {
+    override fun stop() {
         stopRtp(); stopUsb()
         if (engineRunning) {
             nativeStop(); nativeTerm()
