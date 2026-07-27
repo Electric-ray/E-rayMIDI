@@ -161,7 +161,7 @@ class RtpMidiSession(
             }
             if (it < 2) Thread.sleep(5)
         }
-        Log.i(TAG, "BY×3 전송 (port=$remotePort) — ESP32 세션 즉시 해제 요청")
+        Log.i(TAG, "BY×3 전송 (port=$remotePort, ssrc=${ssrc.toString(16)}) — ESP32 세션 즉시 해제 요청")
     }
 
     // MuntEngine이 BY 이후 재연결을 기다릴 때 사용 (현재 미사용, 향후 확장용)
@@ -186,8 +186,12 @@ class RtpMidiSession(
             onStatus("소켓 생성: ctrl=${ctrl.localPort} data=${data.localPort}")
 
             // STEP 1: 제어 핸드셰이크
-            sendInvite(ctrl, BASE)
-            onStatus("IN → ESP32:$BASE")
+            // 진단용: ESP32가 이 ssrc를 참가자 식별키로 저장해둔다 (AppleMIDI.hpp ReceivedEndSession()이
+            // endSession.ssrc == participant.ssrc로만 매칭함). 나중에 stop()이 보내는 BY도 같은 ssrc를
+        // 쓰는지 ESP32 시리얼로그의 "connected: ... ssrc=" 값과 이 로그를 직접 대조해볼 수 있다.
+        Log.i(TAG, "IN 전송: ssrc=${ssrc.toString(16)} token=${token.toString(16)}")
+        sendInvite(ctrl, BASE)
+        onStatus("IN → ESP32:$BASE")
             val ctrlOk = waitFor(ctrl, "제어", timeoutMs = 5000) { buf, len, addr, sock ->
                 parseSessionPkt(buf, len, addr, sock, "ctrl")
             }
