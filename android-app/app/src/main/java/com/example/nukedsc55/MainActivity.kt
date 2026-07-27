@@ -418,6 +418,24 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         val useSoundFont = rbEngineSoundfont.isChecked
         val useMunt = rbEngineMunt.isChecked
         val useRtp = findViewById<RadioButton>(R.id.rbConnRtp).isChecked
+        val useUsbMidiDevice = findViewById<RadioButton>(R.id.rbConnUsbMidi).isChecked
+
+        // 연결방식에 따라 실제 입력 경로를 열어주는 공통 함수.
+        // USB MIDI기기 모드에서는 RTP/USB-Serial을 전혀 시작하지 않고,
+        // EngineRegistry.active만 설정해서 UsbMidiDeviceService(안드로이드가 USB
+        // MIDI 주변장치로 노출된 동안 시스템이 넣어주는 MIDI)이 이 엔진으로 바로
+        // 전달되도록만 한다.
+        fun startInputPath(engine: IEngine): Boolean {
+            return when {
+                useUsbMidiDevice -> {
+                    EngineRegistry.active = engine
+                    status("🎹 USB MIDI기기 모드 — Windows 등 PC에서 이 폰을 MIDI 입력장치로 선택하세요")
+                    true
+                }
+                useRtp -> { engine.startRtp(); true }
+                else -> engine.startUsb()
+            }
+        }
 
         if (useSoundFont) {
             val path = selectedSoundFontPath
@@ -427,31 +445,22 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 return
             }
             if (!sfEngine.initEngine(path)) return
-            if (useRtp) sfEngine.startRtp() else {
-                val ok = sfEngine.startUsb()
-                if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
-            }
+            if (!startInputPath(sfEngine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
             activeEngineType = EngineType.SOUNDFONT
-            EngineRegistry.active = sfEngine
+            if (!useUsbMidiDevice) EngineRegistry.active = sfEngine
             startInstrumentPanel()
         } else if (useMunt) {
             if (!muntEngine.initEngine()) return
-            if (useRtp) muntEngine.startRtp() else {
-                val ok = muntEngine.startUsb()
-                if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
-            }
+            if (!startInputPath(muntEngine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
             activeEngineType = EngineType.MUNT
-            EngineRegistry.active = muntEngine
+            if (!useUsbMidiDevice) EngineRegistry.active = muntEngine
             startInstrumentPanel()
         } else {
             if (!sc55Engine.initEngine()) return
-            if (useRtp) sc55Engine.startRtp() else {
-                val ok = sc55Engine.startUsb()
-                if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
-            }
+            if (!startInputPath(sc55Engine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
             startLcdUpdates()
             activeEngineType = EngineType.SC55
-            EngineRegistry.active = sc55Engine
+            if (!useUsbMidiDevice) EngineRegistry.active = sc55Engine
         }
 
         rgConnection.isEnabled = false

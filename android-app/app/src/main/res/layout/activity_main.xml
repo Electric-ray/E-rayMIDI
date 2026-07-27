@@ -104,6 +104,14 @@
             android:layout_weight="1"
             android:text="🔌 USB 시리얼"
             android:textColor="#e0e0ff"/>
+
+        <RadioButton
+            android:id="@+id/rbConnUsbMidi"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎹 USB MIDI기기"
+            android:textColor="#e0e0ff"/>
     </RadioGroup>
 
     <!-- ② 재생 엔진 선택 -->
