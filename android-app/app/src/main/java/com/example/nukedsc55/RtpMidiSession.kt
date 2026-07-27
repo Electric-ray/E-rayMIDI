@@ -140,6 +140,13 @@ class RtpMidiSession(
         // 해결: close() 전에 BY를 ctrl/data 포트 둘 다에 보내 ESP32가 즉시 세션을 해제하도록 함.
         ctrlSock?.let { sendBy(it, BASE) }
         dataSock?.let { sendBy(it, BASE + 1) }
+        // FIX (BY가 ESP32에 도달하지 않는 문제 재현): send()가 리턴된다고 해서 그 패킷이
+        // 실제로 WiFi 안테나를 타고 나갔다는 보장은 없다 — 커널 큐에 들어간 것뿐일 수 있다.
+        // ESP32 실제 로그를 파서 확인해보니 BY가 도착한 적이 한 번도 없었는데, 의심되는 건
+        // 바로 그 직후에 wifiLock.release() + 소켓 close()가 즉시 이어진다는 것 —
+        // WiFi 드라이버가 아직 전송 큐에 있는 패킷을 미처 내보내기 전에 자원을 정리해버릴 수 있다.
+        // 패킷이 실제로 전파를 타고 나갈 시간을 버는 짧은 대기를 준다.
+        try { Thread.sleep(80) } catch (_: InterruptedException) {}
         regListener?.let { runCatching { nsdMgr?.unregisterService(it) } }
         multicastLock?.release()
         wifiLock?.release()
