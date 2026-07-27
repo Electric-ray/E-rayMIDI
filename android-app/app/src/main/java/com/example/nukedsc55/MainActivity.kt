@@ -432,6 +432,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
             }
             activeEngineType = EngineType.SOUNDFONT
+            EngineRegistry.active = sfEngine
             startInstrumentPanel()
         } else if (useMunt) {
             if (!muntEngine.initEngine()) return
@@ -440,6 +441,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 if (!ok) status("⚠️ USB 연결 대기 중 (권한 확인)")
             }
             activeEngineType = EngineType.MUNT
+            EngineRegistry.active = muntEngine
             startInstrumentPanel()
         } else {
             if (!sc55Engine.initEngine()) return
@@ -449,6 +451,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             }
             startLcdUpdates()
             activeEngineType = EngineType.SC55
+            EngineRegistry.active = sc55Engine
         }
 
         rgConnection.isEnabled = false
@@ -470,6 +473,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             null -> {}
         }
         activeEngineType = null
+        EngineRegistry.active = null
 
         rgConnection.isEnabled = true
         for (i in 0 until rgConnection.childCount) rgConnection.getChildAt(i).isEnabled = true

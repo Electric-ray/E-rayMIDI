@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MidiDeviceService가 노출하는 포트 정의.
+  input-port 하나만 선언 — Windows PC 등 MIDI 호스트가 여기로 MIDI를 보내면
+  UsbMidiDeviceService.onGetInputPortReceivers()가 그걸 받아 현재 활성 엔진으로 넘긴다.
+  (이 프로젝트는 안드로이드 쪽에서 소리를 내는 것이 목적이라 output-port는 없음)
+-->
+<devices>
+    <device manufacturer="Electric-ray" product="NukedSC55Android">
+        <input-port name="MIDI In"/>
+    </device>
+</devices>

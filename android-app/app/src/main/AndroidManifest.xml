@@ -20,6 +20,9 @@
 
     <!-- USB OTG -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- 안드로이드를 USB MIDI 주변장치(peripheral)로 노출하기 위함 (Windows PC 등이 이 기기를
+         MIDI 입력장치로 인식) — UsbMidiDeviceService.kt 사용 -->
+    <uses-feature android:name="android.software.midi" android:required="false" />
 
     <!-- 파일 접근: Android 13+ MANAGE_EXTERNAL_STORAGE, 이하 READ_EXTERNAL_STORAGE -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -52,6 +55,20 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+
+        <!-- USB MIDI 주변장치 모드: 이 서비스가 등록되면 Windows PC 등 USB로 연결된
+             호스트가 이 안드로이드 기기를 표준 MIDI 입력장치로 인식한다. -->
+        <service
+            android:name=".UsbMidiDeviceService"
+            android:exported="true"
+            android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.media.midi.MidiDeviceService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.media.midi.MidiDeviceService"
+                android:resource="@xml/midi_device_info" />
+        </service>
     </application>
 
 </manifest>
