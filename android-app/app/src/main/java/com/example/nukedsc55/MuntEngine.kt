@@ -161,13 +161,31 @@ class MuntEngine(val ctx: Context) : IEngine {
     private val mt32SysexCache = mutableListOf<ByteArray>()
     private val mt32CacheLock  = Any()
 
-    // 진단용: 이전에는 200개 캡을 걸어놓았다 — 그러면 세션 중 여러 곱을 거치면서 캐핑이 이미 소진되어,
-    // 정작 문제의 곱에서는 로그가 하나도 안 찍힐 수 있었다 ("MIDI가 안 온다"가 아니라
+    // 진단용: 이전에는 200개 캡을 걸어놓았다 — 그러면 세션 중 여러 곡을 거치면서 캐핑이 이미 소진되어,
+    // 정작 문제의 곡에서는 로그가 하나도 안 찍힐 수 있었다 ("MIDI가 안 온다"가 아니라
     // "로그 창이 이미 닫혀있었다"일 수 있음). 세션 내내 계속 찍히도록 캐을 없애고,
     // 대신 과도한 스팸을 막기 위해 시간 단위로만 약간 생략(2ms당 1개)한다.
     private var midiLogCount = 0
     private var lastMidiLogMs = 0L
     fun resetMidiLogCounter() { midiLogCount = 0 }
+
+    // ── GS Reset 감지 → MT-32 자체 리셋 (새 곡 시작 신호로 해석) ──────────
+    // 일부 곡은 GS(SC-55)용으로 만들어져 곁의 첫 메시지로 "GS Reset"(F0 41 dev 42 12 40 00 7F 00 ck F7)을
+    // 보낸다. mt32emu는 이 헤더를 모르니 무시하고(로그에서 "Header not intended for model MT-32"),
+    // 그 뒤에 이어지는 GS전용 파트 설정(리버브/팜/튜닝 등)도 전부 무시된다. 결과적으로
+    // MT-32는 이 곡의 전용 설정을 하나도 받지 못한 채 직전 곡의 잔존 상태(파트 배정/볼륨/리버브 등)를
+    // 그대로 이어받은 채 Note On을 받는다 — 이게 "MIDI는 들어오는데 소리가 안 난다"의 원인으로 확인됨.
+    // "GS Reset"의 실질적 의도는 기종과 무관하게 "지금 시점에 기기를 완전히 초기화해달라"이므로,
+    // 이 패턴을 감지하면 MT-32도 같이 리셋해서 기본 상태로 되돌린다 (SC-55 경로의 "GS Reset을 SC-55에
+    // 자동으로 걸지 않는다"는 정책과는 무관 — 이건 MT-32가 자기 자신을 리셋하는 거라 충돌하지 않음).
+    private fun isGsReset(b: ByteArray): Boolean =
+        b.size >= 8 &&
+        (b[1].toInt() and 0xFF) == 0x41 &&
+        (b[3].toInt() and 0xFF) == 0x42 &&
+        (b[4].toInt() and 0xFF) == 0x12 &&
+        (b[5].toInt() and 0xFF) == 0x40 &&
+        (b[6].toInt() and 0xFF) == 0x00 &&
+        (b[7].toInt() and 0xFF) == 0x7F
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
@@ -182,6 +200,12 @@ class MuntEngine(val ctx: Context) : IEngine {
             Log.i(TAG, "MIDI#$midiLogCount ch=$ch [$hex]")
         }
         if (bytes[0] == 0xF0.toByte()) {
+            if (isGsReset(bytes)) {
+                Log.i(TAG, "⚠️ GS Reset 감지 → 새 곡 시작으로 보고 MT-32 자체 리셋")
+                synchronized(mt32CacheLock) { mt32SysexCache.clear() }
+                nativeResetSynth()
+                onStatus?.invoke("🔄 새 곡 감지(GS Reset) → MT-32 리셋됨")
+            }
             if (bytes.size >= 4 && (bytes[3].toInt() and 0xFF) == 0x16) {
                 synchronized(mt32CacheLock) { mt32SysexCache.add(bytes.copyOf()) }
                 Log.d(TAG, "MT-32 SysEx 캐시: ${bytes.size}B (총 ${mt32SysexCache.size}개)")
