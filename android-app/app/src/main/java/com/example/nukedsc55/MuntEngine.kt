@@ -187,6 +187,22 @@ class MuntEngine(val ctx: Context) : IEngine {
         (b[6].toInt() and 0xFF) == 0x00 &&
         (b[7].toInt() and 0xFF) == 0x7F
 
+    // ── 파트 채널배정 OFF 감지 → 전달 차단 (로그로 확인된 실제 무음 원인) ──
+    // MT-32 시스템 영역 주소 0x10 0x00 0x0D~0x15 (9개: 파트 1~8 + 리듬)은 각 파트의
+    // MIDI 채널 배정을 설정하는 영역이고, 값 0x10(=16)은 "배정 없음(OFF)"를 의미한다.
+    // 문제의 곡은 이 9개를 전부 OFF로 끔 다음, 재배정을 잘못된 주소(0x52...)로 시도해
+    // mt32emu에 거부되면서("unrecognised address"), 9개 파트가 영구적으로 꺼진 채로 남았다
+    // — MIDI(Note On 포함)는 정상 도착하는데 소리가 안 나는 실제 원인으로 로그로 확인됨.
+    // 이 "전부 OFF" SysEx를 mt32emu로 넘기지 않고 차단해서, 뒤이은 재배정이 실패하더라도
+    // 파트들이 기존 채널 배정을 그대로 유지해서 계속 소리를 낼 수 있도록 한다.
+    private fun isChannelAssignOff(b: ByteArray): Boolean =
+        b.size >= 9 &&
+        (b[3].toInt() and 0xFF) == 0x16 &&
+        (b[5].toInt() and 0xFF) == 0x10 &&
+        (b[6].toInt() and 0xFF) == 0x00 &&
+        (b[7].toInt() and 0xFF) in 0x0D..0x15 &&
+        (b[8].toInt() and 0xFF) == 0x10
+
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
@@ -209,6 +225,10 @@ class MuntEngine(val ctx: Context) : IEngine {
             if (bytes.size >= 4 && (bytes[3].toInt() and 0xFF) == 0x16) {
                 synchronized(mt32CacheLock) { mt32SysexCache.add(bytes.copyOf()) }
                 Log.d(TAG, "MT-32 SysEx 캐시: ${bytes.size}B (총 ${mt32SysexCache.size}개)")
+            }
+            if (isChannelAssignOff(bytes)) {
+                Log.w(TAG, "⚠️ 파트 채널배정 OFF 차단 (주소=${"%02X".format(bytes[7].toInt() and 0xFF)}) — mt32emu로 전달 안함")
+                return
             }
             nativeSendSysEx(bytes, bytes.size)
         } else {
