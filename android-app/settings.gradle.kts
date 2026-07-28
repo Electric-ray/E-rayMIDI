@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NukedSC55Android"
+rootProject.name = "E-ray-MIDI"
 include(":app")

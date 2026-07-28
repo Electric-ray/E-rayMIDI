@@ -87,7 +87,6 @@ class MuntEngine(val ctx: Context) : IEngine {
         val ctrl = File(ROM_DIR, CTRL_ROM).readBytes()
         val pcm  = File(ROM_DIR, PCM_ROM).readBytes()
         onStatus?.invoke("⏳ munt(MT-32) 초기화 중...")
-        resetMidiLogCounter()
         val ok = nativeInit(ctrl, pcm)
         if (!ok) { onStatus?.invoke("❌ munt 초기화 실패"); return false }
         // MuntBridge.cpp의 nativeInit()은 ROM 로드+synth open+AAudio 시작까지
@@ -161,14 +160,6 @@ class MuntEngine(val ctx: Context) : IEngine {
     private val mt32SysexCache = mutableListOf<ByteArray>()
     private val mt32CacheLock  = Any()
 
-    // 진단용: 이전에는 200개 캡을 걸어놓았다 — 그러면 세션 중 여러 곡을 거치면서 캐핑이 이미 소진되어,
-    // 정작 문제의 곡에서는 로그가 하나도 안 찍힐 수 있었다 ("MIDI가 안 온다"가 아니라
-    // "로그 창이 이미 닫혀있었다"일 수 있음). 세션 내내 계속 찍히도록 캐을 없애고,
-    // 대신 과도한 스팸을 막기 위해 시간 단위로만 약간 생략(2ms당 1개)한다.
-    private var midiLogCount = 0
-    private var lastMidiLogMs = 0L
-    fun resetMidiLogCounter() { midiLogCount = 0 }
-
     // ── GS Reset 감지 → MT-32 자체 리셋 (새 곡 시작 신호로 해석) ──────────
     // 일부 곡은 GS(SC-55)용으로 만들어져 곁의 첫 메시지로 "GS Reset"(F0 41 dev 42 12 40 00 7F 00 ck F7)을
     // 보낸다. mt32emu는 이 헤더를 모르니 무시하고(로그에서 "Header not intended for model MT-32"),
@@ -206,15 +197,6 @@ class MuntEngine(val ctx: Context) : IEngine {
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        val now = System.currentTimeMillis()
-        if (now - lastMidiLogMs >= 2) {
-            lastMidiLogMs = now
-            midiLogCount++
-            val hex = bytes.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-            val st = bytes[0].toInt() and 0xFF
-            val ch = if (st in 0x80..0xEF) (st and 0x0F) + 1 else -1
-            Log.i(TAG, "MIDI#$midiLogCount ch=$ch [$hex]")
-        }
         if (bytes[0] == 0xF0.toByte()) {
             if (isGsReset(bytes)) {
                 Log.i(TAG, "⚠️ GS Reset 감지 → 새 곡 시작으로 보고 MT-32 자체 리셋")
@@ -251,7 +233,6 @@ class MuntEngine(val ctx: Context) : IEngine {
     // hard=true → MT-32 Master Reset SysEx까지 재생. SC-55 경로의 GS Reset
     // 금지 정책과는 무관한, munt 전용 리셋 경로(MuntBridge.cpp)이다.
     override fun resetEngine(hard: Boolean) {
-        resetMidiLogCounter()
         nativeResetSynth()
         if (hard) replaySysexCache()
         onStatus?.invoke(if (hard) "🔄 MT-32 리셋 완료 — 게임 음악을 재시작하세요" else "🔇 All Notes/Sound Off")
@@ -266,21 +247,6 @@ class MuntEngine(val ctx: Context) : IEngine {
     }
 
     fun stats(): String = nativeGetStats()
-
-    // ── UI용 악기명 패널 텍스트 (SC-55 LCD를 대체하는 간단한 텍스트 표시)
-    // MT-32 관습: Part1-8 = MIDI 채널 2-9, Rhythm = 채널 10 (채널 1은 미사용)
-    fun getPartPanelText(): String {
-        val stats = nativeGetStats()
-        val namesLine = stats.lineSequence().firstOrNull { it.startsWith("names:") }
-            ?: return "악기 정보 대기 중…"
-        val names = namesLine.removePrefix("names:").split(",")
-        return buildString {
-            for (i in names.indices) {
-                val label = if (i < 8) "CH${i + 2} (Part${i + 1})" else "CH10 (Rhythm)"
-                appendLine("$label: ${names.getOrElse(i) { "---" }.trim()}")
-            }
-        }
-    }
 
     // munt-android 원본 GUI(LED 및 패치명 9개 항목)를 재현하기 위한 데이터 ──
     // partStates: 비트 i = 파트 i가 현재 음을 내고 있는지 여부 (nativeGetStats()의 "partStates:" 값)

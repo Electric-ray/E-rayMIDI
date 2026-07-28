@@ -15,7 +15,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="🎹 Nuked SC-55 for Android"
+        android:text="🎹 E-ray MIDI"
         android:textSize="18sp"
         android:textColor="#e0e0ff"
         android:textStyle="bold"
