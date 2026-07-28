@@ -1,6 +1,7 @@
-﻿package com.example.nukedsc55
+package com.example.nukedsc55
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -61,6 +62,60 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
     private lateinit var muntEngine: MuntEngine
+
+    // ── USB MIDI 주변장치(peripheral) 실제 연결 ──────────────────────
+    // (munt-android 참고: UsbMidiDeviceService를 매니페스트에 등록해놓는 것만으로는
+    //  실제 물리 USB 케이블로 연결된 PC의 MIDI가 안 들어온다 — 그건 다른 앱이 우리
+    //  앱으로 MIDI를 보낼 때 쓰는 가상장치 경로임. 실제 물리 USB 주변장치 포트는 안드로이드가
+    //  시스템적으로 만들어주는 별도의 MidiDevice로, MidiManager.getDevices()로 찾아서
+    //  직접 열고 그 출력포트(=PC에서 보낸 데이터)에 리시버를 붙여야만 실제로 데이터가 온다.
+    private var usbMidiDeviceCallback: android.media.midi.MidiManager.DeviceCallback? = null
+    private var usbMidiOpenDevice: android.media.midi.MidiDevice? = null
+    private var usbMidiOutputPort: android.media.midi.MidiOutputPort? = null
+    private val usbMidiThread by lazy {
+        HandlerThread("UsbMidiPeripheralThread", android.os.Process.THREAD_PRIORITY_URGENT_AUDIO).apply { start() }
+    }
+    private val usbMidiParser = MidiStreamParser { bytes -> EngineRegistry.active?.dispatchMidi(bytes) }
+
+    private fun startUsbMidiPeripheral() {
+        val midiManager = getSystemService(Context.MIDI_SERVICE) as android.media.midi.MidiManager
+        val midiHandler = Handler(usbMidiThread.looper)
+
+        fun tryOpen(info: android.media.midi.MidiDeviceInfo) {
+            midiManager.openDevice(info, { device ->
+                if (device == null) return@openDevice
+                usbMidiOpenDevice = device
+                usbMidiOutputPort = device.openOutputPort(0)
+                usbMidiOutputPort?.connect(object : android.media.midi.MidiReceiver() {
+                    override fun onSend(data: ByteArray, offset: Int, count: Int, timestamp: Long) {
+                        usbMidiParser.feed(if (offset == 0 && count == data.size) data else data.copyOfRange(offset, offset + count))
+                    }
+                })
+                status("✅ USB MIDI 장치 연결됨")
+            }, midiHandler)
+        }
+
+        // 연결 시점에 이미 보이는 장치 다 시도 (케이블이 이미 꽂혀 있는 경우)
+        midiManager.devices.forEach { tryOpen(it) }
+
+        // 케이블을 연결하는 시점이 앱 실행 이후일 수도 있으므로, 새 장치가 나타나는 것도 감지
+        usbMidiDeviceCallback = object : android.media.midi.MidiManager.DeviceCallback() {
+            override fun onDeviceAdded(info: android.media.midi.MidiDeviceInfo) { tryOpen(info) }
+        }
+        midiManager.registerDeviceCallback(usbMidiDeviceCallback!!, midiHandler)
+    }
+
+    private fun stopUsbMidiPeripheral() {
+        usbMidiDeviceCallback?.let {
+            val midiManager = getSystemService(Context.MIDI_SERVICE) as android.media.midi.MidiManager
+            runCatching { midiManager.unregisterDeviceCallback(it) }
+        }
+        usbMidiDeviceCallback = null
+        runCatching { usbMidiOutputPort?.close() }
+        runCatching { usbMidiOpenDevice?.close() }
+        usbMidiOutputPort = null
+        usbMidiOpenDevice = null
+    }
 
     // 현재 연결을 시작한 엔진 (셋 중 하나만 동시에 돌릴 수 있음)
     private enum class EngineType { SC55, SOUNDFONT, MUNT }
@@ -429,6 +484,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             return when {
                 useUsbMidiDevice -> {
                     EngineRegistry.active = engine
+                    startUsbMidiPeripheral()
                     status("🎹 USB MIDI기기 모드 — Windows 등 PC에서 이 폰을 MIDI 입력장치로 선택하세요")
                     true
                 }
@@ -483,6 +539,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         }
         activeEngineType = null
         EngineRegistry.active = null
+        stopUsbMidiPeripheral()
 
         rgConnection.isEnabled = true
         for (i in 0 until rgConnection.childCount) rgConnection.getChildAt(i).isEnabled = true
