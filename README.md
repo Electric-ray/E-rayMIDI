@@ -52,7 +52,7 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
 
 ### 연결 방식 (셋 중 선택)
 - **📡 RTP-MIDI**: ESP32가 WiFi AppleMIDI로 중계. 케이블 없이 무선으로 연결.
-- **🔌 USB 시리얼**: ESP32와 USB-OTG 케이블로 직결 (`usb-serial-for-android`). 가장 안정적.
+- **🔌 USB 시리얼**: DOS PC와 시리얼널모뎀 케이블로 직결.
 - **🎹 USB MIDI기기**: 안드로이드 기기 자체를 USB MIDI 주변장치로 노출 — Windows 등
   PC에 케이블로 연결하면 표준 MIDI 입력 장치로 인식되어, SoftMPU 같은 DOS MIDI 드라이버나
   DAW가 직접 이 폰으로 MIDI를 보낼 수 있습니다. (`MidiManager`로 시스템이 제공하는
