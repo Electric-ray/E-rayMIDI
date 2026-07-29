@@ -93,25 +93,25 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="📡 RTP-MIDI"
-            android:textColor="#e0e0ff"
-            android:checked="true"/>
+            android:checked="true"
+            android:text="RTP-MIDI"
+            android:textColor="#e0e0ff" />
 
         <RadioButton
             android:id="@+id/rbConnUsb"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🔌 USB 시리얼"
-            android:textColor="#e0e0ff"/>
+            android:text="USB 시리얼"
+            android:textColor="#e0e0ff" />
 
         <RadioButton
             android:id="@+id/rbConnUsbMidi"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🎹 USB MIDI기기"
-            android:textColor="#e0e0ff"/>
+            android:text="USB MIDI"
+            android:textColor="#e0e0ff" />
     </RadioGroup>
 
     <!-- ② 재생 엔진 선택 -->
@@ -135,25 +135,25 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🎹 SC-55"
-            android:textColor="#e0e0ff"
-            android:checked="true"/>
+            android:checked="true"
+            android:text="SC-55"
+            android:textColor="#e0e0ff" />
 
         <RadioButton
             android:id="@+id/rbEngineSoundfont"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🎵 SoundFont"
-            android:textColor="#e0e0ff"/>
+            android:text="SoundFont"
+            android:textColor="#e0e0ff" />
 
         <RadioButton
             android:id="@+id/rbEngineMunt"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="🎷 MT-32"
-            android:textColor="#e0e0ff"/>
+            android:text="MT-32"
+            android:textColor="#e0e0ff" />
     </RadioGroup>
 
     <!-- 사운드폰트 선택 (SoundFont 모드일 때만 표시) -->
@@ -187,25 +187,25 @@
             android:layout_marginStart="8dp"/>
     </LinearLayout>
 
-    <!-- ▶ 연결 시작 버튼 -->
+    <!-- 🔄 기기 초기화 버튼 (연결 중일 때만 활성화, SC-55/SoundFont/MT-32 공통) -->
     <Button
-        android:id="@+id/btnConnect"
+        android:id="@+id/btnResetEngine"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="🔄 기기 초기화"
+        android:textColor="#ffffff"
+        android:backgroundTint="#553311"
+        android:layout_marginBottom="6dp"
+        android:enabled="false"/>
+
+    <!-- ▶/⏹ 연결·정지 토글 버튼 -->
+    <Button
+        android:id="@+id/btnConnectToggle"
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:text="▶ 연결 시작"
         android:textColor="#ffffff"
         android:backgroundTint="#0f3460"/>
-
-    <!-- 정지 버튼 -->
-    <Button
-        android:id="@+id/btnStop"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:text="⏹  정지"
-        android:textColor="#ffffff"
-        android:backgroundTint="#6b0000"
-        android:layout_marginTop="6dp"
-        android:enabled="false"/>
 
     <!-- 구분선 -->
     <View

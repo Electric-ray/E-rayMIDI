@@ -46,8 +46,8 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var layoutSoundFontPicker: LinearLayout
     private lateinit var tvSoundFontName: TextView
     private lateinit var btnPickSoundFont: Button
-    private lateinit var btnConnect:  Button
-    private lateinit var btnStop:     Button
+    private lateinit var btnConnectToggle: Button
+    private lateinit var btnResetEngine:  Button
     private lateinit var btnRomHelp:  Button
     private lateinit var tvStatus:    TextView
     private lateinit var tvRomStatus: TextView
@@ -120,6 +120,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     // 현재 연결을 시작한 엔진 (셋 중 하나만 동시에 돌릴 수 있음)
     private enum class EngineType { SC55, SOUNDFONT, MUNT }
     private var activeEngineType: EngineType? = null
+
+    // 기기초기화 버튼이 지금 어느 엔진에 resetEngine()을 호출해야 하는지 공통적으로 찾기 위함
+    private fun currentEngine(): IEngine? = when (activeEngineType) {
+        EngineType.SC55 -> sc55Engine
+        EngineType.SOUNDFONT -> sfEngine
+        EngineType.MUNT -> muntEngine
+        null -> null
+    }
 
     private val prefs by lazy { getSharedPreferences("nukedsc55_prefs", MODE_PRIVATE) }
     private var selectedSoundFontPath: String? = null
@@ -247,8 +255,8 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         layoutSoundFontPicker = findViewById(R.id.layoutSoundFontPicker)
         tvSoundFontName = findViewById(R.id.tvSoundFontName)
         btnPickSoundFont = findViewById(R.id.btnPickSoundFont)
-        btnConnect  = findViewById(R.id.btnConnect)
-        btnStop     = findViewById(R.id.btnStop)
+        btnConnectToggle = findViewById(R.id.btnConnectToggle)
+        btnResetEngine   = findViewById(R.id.btnResetEngine)
         btnRomHelp  = findViewById(R.id.btnRomHelp)
         tvStatus    = findViewById(R.id.tvStatus)
         tvRomStatus = findViewById(R.id.tvRomStatus)
@@ -270,12 +278,19 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // 모델 선택 UI 제거됨 — rom_sc55 폴더의 ROM으로 바로 실행
         findViewById<Spinner>(R.id.spinnerModel)?.visibility = android.view.View.GONE
 
-        btnStop.isEnabled = false
+        btnResetEngine.isEnabled = false
 
         rgEngine.setOnCheckedChangeListener { _, _ -> onEngineSelectionChanged() }
         btnPickSoundFont.setOnClickListener { showSoundFontPicker() }
-        btnConnect.setOnClickListener { onConnectClicked() }
-        btnStop.setOnClickListener    { stopAll() }
+        btnConnectToggle.setOnClickListener {
+            if (activeEngineType == null) onConnectClicked() else stopAll()
+        }
+        btnResetEngine.setOnClickListener {
+            currentEngine()?.let {
+                it.resetEngine(true)
+                status("🔄 기기 초기화됨")
+            }
+        }
         btnRomHelp.setOnClickListener { showRomHelp() }
 
         onEngineSelectionChanged()
@@ -524,8 +539,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         rgEngine.isEnabled = false
         for (i in 0 until rgEngine.childCount) rgEngine.getChildAt(i).isEnabled = false
         btnPickSoundFont.isEnabled = false
-        btnConnect.isEnabled = false
-        btnStop.isEnabled = true
+        btnConnectToggle.text = "⏹ 정지"
+        btnConnectToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF6B0000.toInt())
+        btnResetEngine.isEnabled = true
     }
 
     private fun stopAll() {
@@ -546,8 +562,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         rgEngine.isEnabled = true
         for (i in 0 until rgEngine.childCount) rgEngine.getChildAt(i).isEnabled = true
         btnPickSoundFont.isEnabled = true
-        btnConnect.isEnabled = true
-        btnStop.isEnabled = false
+        btnConnectToggle.text = "▶ 연결 시작"
+        btnConnectToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF0F3460.toInt())
+        btnResetEngine.isEnabled = false
         status("⏹ 정지됨")
         updateRomStatus()
     }
