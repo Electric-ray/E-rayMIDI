@@ -82,7 +82,7 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
 ## 알려진 이슈와 대응
 
 - **RTP-MIDI 모드에서 엔진을 빠르게 전환하면 재연결까지 시간이 걸릴 수 있습니다.**
-  ESP32 AppleMIDI 라이브러리 쪽에서 세션 종료 신호를 받고도 즉시 새 연결을 받아주지
+  AppleMIDI 라이브러리 쪽에서 세션 종료 신호를 받고도 즉시 새 연결을 받아주지
   않는 케이스가 확인되었으나, 근본 원인은 아직 못 찾았습니다. **USB 시리얼 또는
   USB MIDI기기 모드는 이 문제가 없습니다** — 잦은 엔진 전환이 필요하면 이 두 방식을
   권장합니다.
@@ -100,7 +100,7 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
 | 엔진 | 경로 |
 |---|---|
 | SC-55 | `/sdcard/Download/rom_sc55/` |
-| MT-32 | `/sdcard/Download/rom_munt/` (`MT32_CONTROL.ROM`, `MT32_PCM.ROM`) |
+| MT-32 | `/sdcard/Download/rom_munt/` |
 | SoundFont | `/sdcard/Download/soundfont/` (`.sf2` 파일) |
 
 SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내" 버튼에서 확인할 수
