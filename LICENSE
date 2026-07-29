@@ -1,0 +1,38 @@
+MIT License
+
+Copyright (c) 2026 전기가오리 (Electric-ray)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This license applies to the app code written for this project. It does NOT
+apply to, and does not grant any rights to:
+
+- The Nuked SC-55 emulator core (github.com/nukeykt/Nuked-SC55), which is
+  licensed under the MAME license (non-commercial use only). See
+  `android-app/app/src/main/cpp/nuked-sc55/LICENSE` for the exact terms.
+- The munt (MT-32/CM-32L) emulator core (github.com/munt/munt), licensed
+  under LGPL-2.1. The full license text is not vendored in this repo's
+  `cpp/munt/mt32emu/` (only source files were copied) — see the upstream
+  repository for the exact terms: https://github.com/munt/munt/blob/master/COPYING.LESSER
+- TinySoundFont (github.com/schellingb/TinySoundFont), MIT License.
+- Any Roland SC-55 / MT-32 ROM images, or any SoundFont (.sf2) files — none of
+  which are included in this repository and must be obtained separately and
+  legally by the user.
