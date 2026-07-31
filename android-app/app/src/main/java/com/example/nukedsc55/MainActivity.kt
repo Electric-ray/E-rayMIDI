@@ -132,6 +132,29 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private val prefs by lazy { getSharedPreferences("nukedsc55_prefs", MODE_PRIVATE) }
     private var selectedSoundFontPath: String? = null
 
+    // ── 재생 중 화면보호기/CPU 절전 방지 ────────────────────────────
+    // 화면이 자동으로 꺼지면(화면보호기 진입) Android가 CPU를 저전력 상태로 내려
+    // MCU/오디오 콜백 스레드가 밀려 음이 끊기거나 불안정해지는 현상이 있었다. 연결 중에는:
+    //  1) FLAG_KEEP_SCREEN_ON 으로 화면보호기 자체가 안 켜지도록 하고,
+    //  2) 혹시라도(사용자가 직접 잠금하는 등) 화면이 꺼져도 CPU는 계속 깨어있도록
+    //     PARTIAL_WAKE_LOCK을 함께 잡아둔다 (화면/터치 입력은 여전히 꺼진 상태 유지).
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    private fun acquirePlaybackWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        wakeLock = pm.newWakeLock(
+            android.os.PowerManager.PARTIAL_WAKE_LOCK, "E-rayMIDI:playback"
+        ).apply { setReferenceCounted(false); acquire() }
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun releasePlaybackWakeLock() {
+        runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
+        wakeLock = null
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
     // ── LCD 렌더링 상태 ──────────────────────────────────────────────────────
     // 트리플 버퍼링(2→3버퍼로 확장): 화면에 표시 중인 비트맵을 백그라운드
     // 스레드가 "바로 다음 프레임"에 다시 덮어쓰지 않도록 한 프레임 더
@@ -300,6 +323,23 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     override fun onResume() {
         super.onResume()
         updateRomStatus()
+        // FIX (배터리): 앱이 백그라운드로 갔다가 돌아오면, 연결 중이던 엔진에 맞는
+        // 화면 갱신(LCD 또는 악기패널)만 다시 켜준다.
+        when (activeEngineType) {
+            EngineType.SC55 -> startLcdUpdates()
+            EngineType.MUNT, EngineType.SOUNDFONT -> startInstrumentPanel()
+            null -> {}
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // FIX (배터리 낭비 발견): 화면이 꺼지거나(화면보호기) 앱이 백그라운드로 갔을 때
+        // 지금까지는 LCD가 초당 20회, 악기패널이 0.4초마다 계속 그려지고 있었다 —
+        // 보이지도 않는 화면을 위해 CPU/배터리를 계속 쓰는 것. 오디오 자체는 native
+        // 스레드/AAudio 콜백으로 도는 거라 UI 정지와 무관하게 계속 재생된다.
+        stopLcdUpdates()
+        stopInstrumentPanel()
     }
 
     // ── 재생 엔진 선택 UI 반영 ───────────────────────────────────────────
@@ -542,6 +582,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         btnConnectToggle.text = "⏹ 정지"
         btnConnectToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF6B0000.toInt())
         btnResetEngine.isEnabled = true
+        acquirePlaybackWakeLock()
     }
 
     private fun stopAll() {
@@ -567,6 +608,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         btnResetEngine.isEnabled = false
         status("⏹ 정지됨")
         updateRomStatus()
+        releasePlaybackWakeLock()
     }
 
     fun status(msg: String) {
@@ -578,6 +620,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         super.onDestroy()
         stopLcdUpdates()
         stopInstrumentPanel()
+        releasePlaybackWakeLock()
         lcdThread.quitSafely()
         if (activeEngineType != null) stopAll()
     }
