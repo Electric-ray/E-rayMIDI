@@ -1,4 +1,4 @@
-﻿package com.example.nukedsc55
+package com.example.nukedsc55
 
 import android.content.Context
 import android.net.nsd.NsdManager
@@ -254,11 +254,11 @@ class RtpMidiSession(
     private fun midiLoop(ctrl: DatagramSocket, data: DatagramSocket): Boolean {
         val buf = ByteArray(1500)
         var rtpCount = 0L
-        var byReceived = false
 
         // ★ ctrlThread: 소켓 close로만 종료 가능하게 설계
         //    (interrupt()는 DatagramSocket.receive()를 깨우지 못함)
         var ctrlThreadRunning = true
+        val byReceived = java.util.concurrent.atomic.AtomicBoolean(false)
         val ctrlThread = thread(isDaemon = true, name = "rtpmidi-ctrl") {
             val b = ByteArray(256)
             while (running && ctrlThreadRunning) {
@@ -272,7 +272,7 @@ class RtpMidiSession(
                         when (cmdInt) {
                             (CMD_BY.toInt() and 0xFFFF) -> {
                                 Log.w(TAG, "⚠️ BY ctrl 수신 (세션 종료 신호)")
-                                onStatus("BY ctrl"); byReceived = true
+                                onStatus("BY ctrl"); byReceived.set(true)
                             }
                             (CMD_CK.toInt() and 0xFFFF) -> { handleCk(b, p.length, p.socketAddress, ctrl) }
                         }
@@ -301,7 +301,7 @@ class RtpMidiSession(
         lastSentSeq = -1; sysexCount = 0
         lockedDataSsrc = null  // 새 세션에서 다시 처음 본 SSRC를 고정하도록 리셋
 
-        while (running && !byReceived) {
+        while (running && !byReceived.get()) {
             try {
                 data.soTimeout = 10000
                 val pkt = DatagramPacket(buf, buf.size)
@@ -317,7 +317,7 @@ class RtpMidiSession(
                             val idleMs = System.currentTimeMillis() - lastMidiRxMs
                             Log.w(TAG, "⚠️ BY data 수신 (idle=${idleMs/1000}s, rtp수신=$rtpCount)")
                             onStatus("⚠️ BY (idle=${idleMs/1000}s)")
-                            byReceived = true
+                            byReceived.set(true)
                             byWasIdle = (idleMs > 30_000L)
                         }
                         CMD_OK -> onStatus("OK 재수신 (무시)")
@@ -363,7 +363,7 @@ class RtpMidiSession(
         // ★ ctrlThread 종료: close()로 receive() 블로킹 해제
         ctrlThreadRunning = false
         ctrl.close()  // → ctrlThread의 receive()가 SocketException으로 즉시 탈출
-        return byReceived
+        return byReceived.get()
     }
 
     // ── 100μs 단위 타임스탬프 (Apple MIDI 스펙 단위) ──────────────────────
@@ -594,8 +594,8 @@ class RtpMidiSession(
                     if (!checksumOk) {
                         Log.w(TAG, "⚠️ DT1 체크섬 불일치(${sysexBuf.size}B) — 송신측 손실로 보고 엔진에 전달하지 않음")
                     } else {
-                        val fullHex = sysexBuf.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-                        Log.i(TAG, "SysEx완성#${++sysexCount} [${sysexBuf.size}B] $fullHex")
+                        // FIX (외부 리뷰로 확인된 문제): SysEx가 완성될 때마다 hex 문자열을 만들어 찍으면
+                        // joinToString+format이 매번 문자열을 할당해 GC 압력을 키운다. 디버깅이 끝난 지금은 제거.
                         onMidiMessage(sysexBuf.toByteArray())
                     }
                     sysexBuf.clear(); inSysex = false
@@ -685,14 +685,9 @@ class RtpMidiSession(
             lastPayloadHash = h; lastPayloadTimeMs = nowMs2
         }
 
-        // ★ 처음 5패킷 MIDI 섹션 hex dump
-        // 이 SysEx 버그를 끝까지 추적하기 위해 세션 초반 300패킷은 조건 없이 무조건 덤프한다.
-        if (rtpDumpCount < 300) {
-            val cmdBytes = buf.slice(bb.position() until minOf(end, len))
-                .joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-            Log.i(TAG, "RTP[${rtpDumpCount}] seq=$seq inSysexAtStart=$inSysex flag=0x%02X longH=$longH fz=$fz cmdLen=$cmdLen [$cmdBytes]".format(flag))
-            rtpDumpCount++
-        }
+        // FIX (외부 리뷰로 확인된 문제): 이전에는 세션 초반 300패킷을 hex 덤프로 무조건 찍었다 —
+        // joinToString+format은 패킷마다 문자열 할당을 유발해 GC 압력을 키운다. 디버깅이
+        // 끝난 지금은 제거.
 
         var first = true
         while (bb.position() < end && bb.hasRemaining()) {
@@ -741,8 +736,8 @@ class RtpMidiSession(
                 // 붙여넣고 있어서, USB 원본과 바이트 단위로 비교해보니 정확히 그 지점부터 한 칸씩 밀렸다.
                 // 미완성이면 마지막 마커 바이트를 버리고 이어붙인다.
                 val payload = if (complete) chunk else chunk.dropLast(1)
-                val hex = payload.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-                Log.i(TAG, "SysEx발견: ${payload.size}bytes [$hex] 완료=$complete")
+                // FIX (외부 리뷰로 확인된 문제): 조각마다 hex 로그를 찍으면 실제 GC 압력이 되는 것이
+                // 확인되어 제거. (로그 없이도 payload/sysexFeed 로직은 동일)
                 rs = 0; sysexFeed(payload.toByteArray())
             }
             b and 0x80 == 0 && inSysex -> {
@@ -757,8 +752,6 @@ class RtpMidiSession(
                 // 위와 동일한 이유: 이어쓰기 조각도 또 다음 패킷으로 이어지면(미완성) 마지막
                 // 바이트가 실데이터가 아닌 "이어짐" 마커이므로 버려야 한다.
                 val payload = if (complete) chunk else chunk.dropLast(1)
-                val hex = payload.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
-                Log.i(TAG, "SysEx이어쓰기: ${payload.size}bytes [$hex] 완료=$complete")
                 sysexFeed(payload.toByteArray())
             }
             b and 0x80 != 0 -> { rs = b; buildMsg(b, bb)?.let { onMidiMessage(it) } }
