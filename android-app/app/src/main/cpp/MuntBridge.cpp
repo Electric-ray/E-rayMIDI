@@ -92,41 +92,48 @@ static std::atomic<int>      g_logCount{0};
 // ── AAudio ────────────────────────────────────────────────────────────────
 #define SAMPLE_RATE 32000
 static AAudioStream* g_aaStream = nullptr;
-static bool g_threadPrioSet = false;
 
 #define MIDI_SLICE_FRAMES 160
 
 static aaudio_data_callback_result_t aaCallback(
         AAudioStream*, void*, void* audioData, int32_t numFrames) {
 
-    if (!g_threadPrioSet) {
-        g_threadPrioSet = true;
-        sched_param sp{}; sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-        pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
-    }
+    // FIX (외부 리뷰로 확인된 문제): SCHED_FIFO는 SC55Bridge.cpp에서 이미 제거된 패턴이다 —
+    // Android/Linux 커널이 SCHED_FIFO 스레드를 주기적으로 강제 throttle해서 오히려 주기적인
+    // 오디오 끑김(stutter)을 유발한다는 것이 SC-55 쪽에서 검증된 사실이고, AAudio의
+    // LOW_LATENCY 퍼포먼스 모드가 이미 적절한 스케쥴링을 요청하므로 직접 SCHED_FIFO를 건드릴
+    // 필요가 없다. Munt에도 동일하게 적용.
 
     auto* buf = static_cast<int16_t*>(audioData);
-    std::lock_guard<std::mutex> lk(g_mtx);
-
     if (!g_synth) {
         memset(buf, 0, numFrames * 2 * sizeof(int16_t));
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
 
+    // FIX (외부 리뷰로 확인된 버그, SC55Bridge.cpp와 동일한 패턴): 이전에는 g_evMtx를
+    // 큐 전체를 드레인하는 동안 계속 잡고 있어서, MIDI가 한꿼번에 많이 쌓이면(한 RTP
+    // 패킷에 여러 MIDI 명령이 들어있는 흔한 경우) 이 락이 오래 잡혀 있어 nativeSendMidi/
+    // nativeSendSysEx를 호출하는 RTP/USB 수신 스레드가 멈춘다. 수정: 락 안에서는 큐를
+    // 로컬 변수로 swap만 하고(O(1), 마이크로초 단위), 실제 playMsg/playSysex 처리는 락 없이 한다.
+    std::deque<MidiEv> localQ;
+    {
+        std::lock_guard<std::mutex> qlk(g_evMtx);
+        localQ.swap(g_evQ);
+    }
+
+    std::lock_guard<std::mutex> lk(g_mtx);
+
     int32_t offset = 0;
     while (offset < numFrames) {
-        {
-            std::lock_guard<std::mutex> qlk(g_evMtx);
-            while (!g_evQ.empty()) {
-                auto& ev = g_evQ.front();
-                if (ev.isSysex && ev.sysex)
-                    g_synth->playSysex(
-                        (const MT32Emu::Bit8u*)ev.sysex->data(),
-                        (MT32Emu::Bit32u)ev.sysex->size());
-                else
-                    g_synth->playMsg((MT32Emu::Bit32u)ev.msg);
-                g_evQ.pop_front();
-            }
+        while (!localQ.empty()) {
+            auto& ev = localQ.front();
+            if (ev.isSysex && ev.sysex)
+                g_synth->playSysex(
+                    (const MT32Emu::Bit8u*)ev.sysex->data(),
+                    (MT32Emu::Bit32u)ev.sysex->size());
+            else
+                g_synth->playMsg((MT32Emu::Bit32u)ev.msg);
+            localQ.pop_front();
         }
         int32_t toRender = std::min(MIDI_SLICE_FRAMES, numFrames - offset);
         g_synth->render(buf + offset * 2, (MT32Emu::Bit32u)toRender);
@@ -137,7 +144,11 @@ static aaudio_data_callback_result_t aaCallback(
 }
 
 static bool startAAudio() {
-    constexpr int32_t CB_FRAMES  = 960;
+    // FIX (외부 리뷰 제안): 960프레임(32kHz에서 30ms)은 SC-55의 kFramesBurst=512와 비교해
+    // 응답성이 느렸다 — MIDI가 들어와도 콜백이 처리될 때까지 최대 30ms 걸릴 수 있음.
+    // 480(15ms)으로 줄임 — 너무 작게 줄이면 콜백 횟수가 늘어 CPU 부담이 커질 수 있어
+    // 중간값으로 보수적으로 택함.
+    constexpr int32_t CB_FRAMES  = 480;
     constexpr int32_t BUF_FRAMES = CB_FRAMES * 6;
 
     AAudioStreamBuilder* builder = nullptr;
@@ -184,7 +195,6 @@ static void stopAAudio() {
         AAudioStream_close(g_aaStream);
         g_aaStream = nullptr;
     }
-    g_threadPrioSet = false;
 }
 
 static void freeRom() {
@@ -297,8 +307,12 @@ Java_com_example_nukedsc55_MuntEngine_nativeResetSynth(JNIEnv*,jobject) {
     g_evQ.clear();
     if (!g_synth) return;
 
+    // FIX (외부 리뷰로 확인된 버그): MT-32 표준 관습상 Part1-8은 MIDI 채널 2-9,
+    // Rhythm은 채널 10이고 채널 1은 미사용이다. 이전 코드는 "ch==8"(=채널 9, 실제로 Part8이
+    // 있는 유효한 채널)를 스킵하고 있어서 Part8이 All Notes Off를 안 받았다 —
+    // 스킵해야 할 건 미사용 채널인 "ch==0"(=채널 1)이다.
     for (int ch = 0; ch < 10; ch++) {
-        if (ch == 8) continue;
+        if (ch == 0) continue;
         g_evQ.push_back({false, (uint32_t)(0xB0|ch)|(123u<<8)|(0u<<16), nullptr});
         g_evQ.push_back({false, (uint32_t)(0xB0|ch)|(120u<<8)|(0u<<16), nullptr});
     }
