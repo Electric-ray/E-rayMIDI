@@ -222,7 +222,11 @@ class MuntEngine(val ctx: Context) : IEngine {
     }
 
     override fun allNotesOff() {
-        for (ch in 0..8) {
+        // FIX (외부 리뷰로 확인된 버그): 0..8은 MIDI 채널 1~9만 눈 것이라 리듬
+        // 파트(채널 10)가 All Notes Off를 못 받았다 — 드럼 음이 계속 남는 원인이 될 수 있음.
+        // MT-32 표준 관습: Part1-8=채널 2-9, Rhythm=채널 10, 채널 1은 미사용.
+        // 채널 0(=1)도 함께 꺼도 무해하니 단순히 0..9(채널 1~10) 전체를 커버한다.
+        for (ch in 0..9) {
             nativeSendMidi((0xB0 or ch) or (123 shl 8))
             nativeSendMidi((0xB0 or ch) or (120 shl 8))
         }
