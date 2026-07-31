@@ -225,11 +225,13 @@ static int midiEventByteSize(const MidiEv& ev) {
 }
 
 static void postOneMidiEvent(const MidiEv& ev) {
+    // FIX (외부 리뷰로 확인된 문제): 이전에는 ProgChange/BankSel/NRPN/FX/SysEx를
+    // 매 MIDI 메시지마다 LOGI로 찍었다. logcat이 필터링되어 있더라도 문자열 포맷팅
+    // 자체가 프로세스 내에서 일어나므로, 이 빈도 높은 경로에서는 실제 CPU/GC 부담이
+    // 되는 것이 확인되었다 (MCU 스레드가 Step() 사이사이에 드레인하는 지점에서 호출되므로
+    // 매우 빈번하게 실행될 수 있음). 실제 재생에서는 제거.
     if (ev.isSysex && ev.sysex) {
         auto& v = *ev.sysex;
-        if (v.size() >= 4)
-            LOGI("SysEx[%zuB]: %02X %02X %02X %02X ...", v.size(),
-                 v[0], v[1], v[2], v[3]);
         s_emu.PostMIDI(std::span<const uint8_t>(v.data(), v.size()));
     } else {
         uint8_t st  = ev.packed & 0xFF;
@@ -239,16 +241,6 @@ static void postOneMidiEvent(const MidiEv& ev) {
         int len = 1;
         if ((st & 0xF0) == 0xC0 || (st & 0xF0) == 0xD0)          len = 2;
         else if ((st & 0x80) && (st & 0xF0) <= 0xE0)              len = 3;
-        if ((st & 0xF0) == 0xC0) {
-            LOGI("ProgChange ch%d prog=%d", (st & 0x0F)+1, d1);
-        } else if ((st & 0xF0) == 0xB0) {
-            if (d1 == 0 || d1 == 32)
-                LOGI("BankSel ch%d cc%d=%d", (st & 0x0F)+1, d1, d2);
-            else if (d1 == 98 || d1 == 99 || d1 == 6 || d1 == 38)
-                LOGI("NRPN ch%d cc%d=%d", (st & 0x0F)+1, d1, d2);
-            else if (d1 == 91 || d1 == 93)
-                LOGI("FX ch%d cc%d=%d", (st & 0x0F)+1, d1, d2);
-        }
         s_emu.PostMIDI(std::span<const uint8_t>(msg, len));
     }
 }
