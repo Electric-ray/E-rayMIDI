@@ -361,5 +361,12 @@ class SC55Engine(val ctx: Context) : IEngine {
             nativeStop(); nativeTerm()
             engineRunning = false
         }
+        // FIX (외부 리뷰로 확인된 버그): sustainWatchdog/noteWatchdog 스레드 자체는
+        // engineRunning=false가 되면 자연스럽게 종료되지만, 변수가 null로 되돌아가지 않아서
+        // start...Watchdog()의 "if (xxx != null) return" 가드가 다음 재연결 시에도
+        // 계속 true로 남아 워치독이 다시 시작되지 않는 버그가 있었다 — 재연결 이후
+        // stuck note 방지 기능이 꺼진 채로 남을 수 있었음.
+        sustainWatchdog = null
+        noteWatchdog = null
     }
 }
