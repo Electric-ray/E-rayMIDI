@@ -32,6 +32,8 @@
 #include <vector>
 #include <memory>
 #include <sched.h>
+#include <thread>
+#include <chrono>
 
 #include "munt/mt32emu/mt32emu.h"
 
@@ -95,51 +97,107 @@ static AAudioStream* g_aaStream = nullptr;
 
 #define MIDI_SLICE_FRAMES 160
 
+// FIX (실기 검증된 문제: MT-32에서만 지터 발생, SC-55는 문제 없음): 이전에는
+// g_synth->render()를 AAudio 오디오 콜백 안에서 직접 호출했다. 폴리포니가 많은(화음
+// 많은) 구간에서 render()가 순간적으로 무거워지면, 이 콜백은 실시간 제약(480프레임
+// 분을 시간 안에 끝내야 함)을 못 지키고 지터가 난다 — SC-55는 이미 MCU 에뮬레이션을
+// 전용 스레드에서 미리 돌려 링버퍼(atomic head/tail)에 채워놓고 오디오 콜백은 그
+// 링버퍼에서만 꺼내기(O(1))하는 구조라 이런 문제가 없다. 동일한 패턴을 Munt에도 적용:
+// 렌더링은 전용 스레드(synthThreadLoop)가 미리 해두고, AAudio 콜백은 링버퍼에서
+// 꺼내기만 한다 — 실시간 스레드가 더이상 mt32emu 렌더링 비용에 직접 노출되지 않는다.
+struct StereoS16 { int16_t l, r; };
+static constexpr int RING_FRAMES = 8192; // 32kHz에서 약 256ms — 순간적 CPU 지연을 흡수할 충분한 여유
+static StereoS16        s_ring[RING_FRAMES];
+static std::atomic<int> s_ringHead{0};
+static std::atomic<int> s_ringTail{0};
+
+static inline int ring_size() {
+    return (s_ringHead.load(std::memory_order_acquire) -
+            s_ringTail.load(std::memory_order_acquire) + RING_FRAMES) % RING_FRAMES;
+}
+static void ring_push(const StereoS16& f) {
+    int h  = s_ringHead.load(std::memory_order_relaxed);
+    int nh = (h + 1) % RING_FRAMES;
+    if (nh == s_ringTail.load(std::memory_order_acquire)) return; // 가득 찬 상태, 드롭
+    s_ring[h] = f;
+    s_ringHead.store(nh, std::memory_order_release);
+}
+static bool ring_pop(StereoS16& f) {
+    int t = s_ringTail.load(std::memory_order_relaxed);
+    if (t == s_ringHead.load(std::memory_order_acquire)) { f = {0, 0}; return false; } // 언더런 → 무음
+    f = s_ring[t];
+    s_ringTail.store((t + 1) % RING_FRAMES, std::memory_order_release);
+    return true;
+}
+
+static std::atomic<bool> s_synthRunning{false};
+static std::thread       s_synthThread;
+
+// ── 전용 렌더링 스레드: MIDI 큐 드레인 + synth->render() → 링버퍼 채우기 ────
+static void synthThreadLoop() {
+    constexpr int kHighWater = (RING_FRAMES * 3) / 4;
+    int16_t tmp[MIDI_SLICE_FRAMES * 2];
+
+    while (s_synthRunning.load(std::memory_order_relaxed)) {
+        // 링버퍼가 너무 차 있으면(=AAudio 소비가 느림) 잠시 쉬어서 CPU를 아낀다
+        while (ring_size() >= kHighWater && s_synthRunning.load(std::memory_order_relaxed))
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        if (!s_synthRunning.load(std::memory_order_relaxed)) break;
+
+        std::deque<MidiEv> localQ;
+        {
+            std::lock_guard<std::mutex> qlk(g_evMtx);
+            localQ.swap(g_evQ);
+        }
+
+        {
+            std::lock_guard<std::mutex> lk(g_mtx);
+            if (!g_synth) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+            while (!localQ.empty()) {
+                auto& ev = localQ.front();
+                if (ev.isSysex && ev.sysex)
+                    g_synth->playSysex(
+                        (const MT32Emu::Bit8u*)ev.sysex->data(),
+                        (MT32Emu::Bit32u)ev.sysex->size());
+                else
+                    g_synth->playMsg((MT32Emu::Bit32u)ev.msg);
+                localQ.pop_front();
+            }
+            g_synth->render(tmp, MIDI_SLICE_FRAMES);
+        }
+
+        for (int i = 0; i < MIDI_SLICE_FRAMES; ++i) {
+            ring_push({tmp[i*2], tmp[i*2+1]});
+        }
+    }
+}
+
+static void startSynthThread() {
+    if (s_synthRunning.load()) return;
+    s_ringHead.store(0); s_ringTail.store(0);
+    s_synthRunning.store(true);
+    s_synthThread = std::thread(synthThreadLoop);
+}
+
+static void stopSynthThread() {
+    if (!s_synthRunning.load()) return;
+    s_synthRunning.store(false);
+    if (s_synthThread.joinable()) s_synthThread.join();
+}
+
+// ── AAudio 콜백: 이제 링버퍼에서 꺼내기만 한다 (O(1), synth 렌더링 비용과 무관) ──
 static aaudio_data_callback_result_t aaCallback(
         AAudioStream*, void*, void* audioData, int32_t numFrames) {
-
-    // FIX (외부 리뷰로 확인된 문제): SCHED_FIFO는 SC55Bridge.cpp에서 이미 제거된 패턴이다 —
-    // Android/Linux 커널이 SCHED_FIFO 스레드를 주기적으로 강제 throttle해서 오히려 주기적인
-    // 오디오 끑김(stutter)을 유발한다는 것이 SC-55 쪽에서 검증된 사실이고, AAudio의
-    // LOW_LATENCY 퍼포먼스 모드가 이미 적절한 스케쥴링을 요청하므로 직접 SCHED_FIFO를 건드릴
-    // 필요가 없다. Munt에도 동일하게 적용.
-
     auto* buf = static_cast<int16_t*>(audioData);
-    if (!g_synth) {
-        memset(buf, 0, numFrames * 2 * sizeof(int16_t));
-        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    for (int32_t i = 0; i < numFrames; ++i) {
+        StereoS16 f{};
+        ring_pop(f);
+        buf[i*2 + 0] = f.l;
+        buf[i*2 + 1] = f.r;
     }
-
-    // FIX (외부 리뷰로 확인된 버그, SC55Bridge.cpp와 동일한 패턴): 이전에는 g_evMtx를
-    // 큐 전체를 드레인하는 동안 계속 잡고 있어서, MIDI가 한꿼번에 많이 쌓이면(한 RTP
-    // 패킷에 여러 MIDI 명령이 들어있는 흔한 경우) 이 락이 오래 잡혀 있어 nativeSendMidi/
-    // nativeSendSysEx를 호출하는 RTP/USB 수신 스레드가 멈춘다. 수정: 락 안에서는 큐를
-    // 로컬 변수로 swap만 하고(O(1), 마이크로초 단위), 실제 playMsg/playSysex 처리는 락 없이 한다.
-    std::deque<MidiEv> localQ;
-    {
-        std::lock_guard<std::mutex> qlk(g_evMtx);
-        localQ.swap(g_evQ);
-    }
-
-    std::lock_guard<std::mutex> lk(g_mtx);
-
-    int32_t offset = 0;
-    while (offset < numFrames) {
-        while (!localQ.empty()) {
-            auto& ev = localQ.front();
-            if (ev.isSysex && ev.sysex)
-                g_synth->playSysex(
-                    (const MT32Emu::Bit8u*)ev.sysex->data(),
-                    (MT32Emu::Bit32u)ev.sysex->size());
-            else
-                g_synth->playMsg((MT32Emu::Bit32u)ev.msg);
-            localQ.pop_front();
-        }
-        int32_t toRender = std::min(MIDI_SLICE_FRAMES, numFrames - offset);
-        g_synth->render(buf + offset * 2, (MT32Emu::Bit32u)toRender);
-        offset += toRender;
-    }
-
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -174,6 +232,8 @@ static bool startAAudio() {
     AAudioStreamBuilder_delete(builder);
     if (r != AAUDIO_OK) { LOGE("스트림 열기 실패: %d", r); return false; }
 
+    startSynthThread();  // 렌더링은 스트림 시작 전부터 미리 돌려 링버퍼를 채우기 시작
+
     int32_t rate  = AAudioStream_getSampleRate(g_aaStream);
     int32_t burst = AAudioStream_getFramesPerBurst(g_aaStream);
     int32_t cap   = AAudioStream_getBufferCapacityInFrames(g_aaStream);
@@ -190,6 +250,7 @@ static bool startAAudio() {
 }
 
 static void stopAAudio() {
+    stopSynthThread();  // 렌더링 스레드를 먼저 멈추고 오디오 스트림을 닫는다
     if (g_aaStream) {
         AAudioStream_requestStop(g_aaStream);
         AAudioStream_close(g_aaStream);
