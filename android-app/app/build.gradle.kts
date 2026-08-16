@@ -41,6 +41,15 @@ android {
         }
     }
 
+    // FluidSynth 공식 Android 프리빌트 .so들(app/src/main/cpp/fluidsynth/lib/<abi>/)을
+    // 그대로 APK에 넣는다. CMake의 target_link_libraries(IMPORTED SHARED)만으로도
+    // 최신 AGP는 대부분 자동 패키징하지만, 확실히 하기 위해 명시적으로도 지정.
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDirs("src/main/cpp/fluidsynth/lib")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled   = false

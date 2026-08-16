@@ -252,10 +252,10 @@ class MuntEngine(val ctx: Context) : IEngine {
 
     fun stats(): String = nativeGetStats()
 
-    // munt-android 원본 GUI(LED 및 패치명 9개 항목)를 재현하기 위한 데이터 ──
+    // munt-android 원본 GUI(LED 및 패치명 9개 항목)를 재현하기 위한 데이터.
+    // PartInfo는 IEngine.kt의 공용 타입 (SoundFontEngine/SYXG50Engine도 재사용).
     // partStates: 비트 i = 파트 i가 현재 음을 내고 있는지 여부 (nativeGetStats()의 "partStates:" 값)
     // 이 값이 계속 0이면서도 MIDI가 계속 들어온다면 폴리포니 고갈/이상동작 진단에도 유용.
-    data class PartInfo(val states: Long, val names: List<String>)
 
     fun getPartInfo(): PartInfo {
         val stats = nativeGetStats()

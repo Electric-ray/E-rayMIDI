@@ -1,6 +1,14 @@
 package com.example.nukedsc55
 
 /**
+ * 엔진 공용 LED 패널 데이터. MuntEngine이 munt-android 원본 GUI를 재현하며
+ * 처음 만든 형태를 SoundFontEngine/SYXG50Engine도 그대로 재사용한다.
+ * states: 비트 i = 채널(파트) i가 지금 소리를 내고 있는지 여부.
+ * names : 채널별 표시 텍스트(악기명 또는 뱅크/프로그램 번호).
+ */
+data class PartInfo(val states: Long, val names: List<String>)
+
+/**
  * IEngine — SC55Engine / MuntEngine / SoundFontEngine이 공유하는 공통 계약.
  *
  * (통합작업순서.md Phase 1 참고)

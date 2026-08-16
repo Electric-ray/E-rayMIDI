@@ -85,26 +85,58 @@ target_link_libraries(nuked-sc55-jni
 )
 
 # ---------------------------------------------------------------------------
-# TinySoundFont (SF2 사운드폰트 재생) JNI 공유 라이브러리
+# FluidSynth (SF2 사운드폰트 재생) JNI 공유 라이브러리
+# 원래 TinySoundFont(헤더 하나짜리 미니 신스)를 쓰다가, 정식 FluidSynth로
+# 교체했다(더 정확한 SF2 해석/이펙트/보이스 관리). FluidSynth 공식 GitHub
+# Release의 Android 프리빌트 바이너리를 그대로 가져다 쓴다 — 예전엔 glib를
+# 직접 크로스컴파일해야 해서 매우 번거로웠지만, 2.5.0부터 glib 없이(C++11
+# OSAL) 빌드된 공식 Android 배포본이 나와서 훨씬 간단해졌다.
+# (다운로드: https://github.com/FluidSynth/fluidsynth/releases, asset:
+#  fluidsynth-v2.6.0-android24.zip → app/src/main/cpp/fluidsynth/ 에 압축 해제)
 # nuked-sc55-jni와 완전히 독립적인 두 번째 .so — 서로 다른 재생 엔진이므로
 # 심볼 충돌 없이 나란히 빌드/링크된다.
 # ---------------------------------------------------------------------------
+set(FLUIDSYNTH_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/fluidsynth)
+set(FLUIDSYNTH_LIB_DIR ${FLUIDSYNTH_ROOT}/lib/${ANDROID_ABI})
+
+# FluidSynth 공식 문서(Using prebuilt libraries on Android)에 나온 패턴:
+# libfluidsynth.so 자체와, 릴리즈 zip에 같이 들어있는 의존 라이브러리들을
+# 전부 IMPORTED SHARED로 선언해야 런타임에 심볼 누락으로 죽지 않는다.
+foreach(FS_LIB IN ITEMS
+    fluidsynth fluidsynth-assetloader
+    FLAC oboe ogg opus sndfile vorbis vorbisenc vorbisfile
+)
+    add_library(lib${FS_LIB} SHARED IMPORTED)
+    set_target_properties(lib${FS_LIB} PROPERTIES
+        IMPORTED_LOCATION ${FLUIDSYNTH_LIB_DIR}/lib${FS_LIB}.so
+    )
+endforeach()
+
 add_library(
     soundfont-jni
     SHARED
-    TsfBridge.cpp
+    FluidBridge.cpp
 )
 
 target_include_directories(soundfont-jni PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/tsf
+    ${FLUIDSYNTH_ROOT}/include
 )
 
 target_compile_options(soundfont-jni PRIVATE
     -O3
-    -ffast-math
 )
 
 target_link_libraries(soundfont-jni
+    libfluidsynth
+    libfluidsynth-assetloader
+    libFLAC
+    liboboe
+    libogg
+    libopus
+    libsndfile
+    libvorbis
+    libvorbisenc
+    libvorbisfile
     ${log-lib}
     ${aaudio-lib}
 )
@@ -178,4 +210,83 @@ target_link_libraries(munt-jni
     mt32emu
     ${log-lib}
     ${aaudio-lib}
+)
+
+# ---------------------------------------------------------------------------
+# madaha(Rust) — S-YXG50 신시사이저 코어 + JNI 공유 라이브러리
+# nuked-sc55-jni / soundfont-jni / munt-jni와 완전히 독립적인 네 번째 .so.
+#
+# madaha_core는 CMake가 아니라 cargo-ndk로 빌드되는 Rust staticlib이다.
+# ANDROID_ABI(CMake가 AGP로부터 자동으로 받는 변수, 예: "arm64-v8a")를
+# cargo-ndk가 그대로 이해하는 타겟 이름이라 별도 매핑이 필요 없다.
+#
+# 사전 준비 (로컬 1회):
+#   rustup target add \
+#       aarch64-linux-android armv7-linux-androideabi \
+#       x86_64-linux-android i686-linux-android
+#   cargo install cargo-ndk
+#   (edition 2024는 rustc 1.85+ stable에 정식 지원 — nightly 불필요, 확인됨)
+#   LLVM 설치(winget install LLVM.LLVM) — opl3-rs가 bindgen으로 libclang 필요
+# ---------------------------------------------------------------------------
+set(MADAHA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/madaha)
+set(MADAHA_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/madaha-target)
+
+# cargo-ndk가 만드는 스테이징 경로는 <target-dir>/<rust-triple>/release/*.a 이다.
+# ANDROID_ABI → rust triple 매핑 (BYPRODUCTS/IMPORTED_LOCATION 지정용).
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(MADAHA_RUST_TRIPLE "aarch64-linux-android")
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(MADAHA_RUST_TRIPLE "armv7-linux-androideabi")
+elseif(ANDROID_ABI STREQUAL "x86_64")
+    set(MADAHA_RUST_TRIPLE "x86_64-linux-android")
+elseif(ANDROID_ABI STREQUAL "x86")
+    set(MADAHA_RUST_TRIPLE "i686-linux-android")
+else()
+    message(FATAL_ERROR "madaha_core: unsupported ANDROID_ABI ${ANDROID_ABI}")
+endif()
+
+set(MADAHA_CORE_LIB ${MADAHA_TARGET_DIR}/${MADAHA_RUST_TRIPLE}/release/libmadaha_core.a)
+
+# BYPRODUCTS가 핵심: add_custom_target 자체는 OUTPUT이 없는 phony 타겟이라,
+# 이게 없으면 Ninja는 이 커맨드가 libmadaha_core.a를 만든다는 걸 전혀 몰라서
+# "no known rule to make it"으로 그래프 구성 단계에서부터 실패한다.
+# BYPRODUCTS로 알려주면 (1) ninja가 이 파일에 대한 생성 규칙으로 인식하고,
+# (2) 그러면서도 ALL 타겟이라 매 빌드마다 커맨드 자체는 계속 실행됨
+# (오래 안 걸림 — cargo 자체가 증분 빌드라 소스 변경 없으면 즉시 끝난다).
+add_custom_target(
+    build_madaha_core ALL
+    COMMAND ${CMAKE_COMMAND} -E env
+        ANDROID_NDK_HOME=${CMAKE_ANDROID_NDK}
+        "LIBCLANG_PATH=C:/Program Files/LLVM/bin"
+        cargo ndk
+            -t ${ANDROID_ABI}
+            --platform 24
+            build --target-dir ${MADAHA_TARGET_DIR} --release --no-default-features --lib
+    BYPRODUCTS ${MADAHA_CORE_LIB}
+    WORKING_DIRECTORY ${MADAHA_ROOT}
+    COMMENT "cargo-ndk: madaha_core staticlib (${ANDROID_ABI})"
+    VERBATIM
+)
+
+add_library(madaha_core STATIC IMPORTED)
+set_target_properties(madaha_core PROPERTIES IMPORTED_LOCATION ${MADAHA_CORE_LIB})
+add_dependencies(madaha_core build_madaha_core)
+
+add_library(
+    syxg50-jni
+    SHARED
+    SYXG50Bridge.cpp
+)
+
+# NOTE: IMPORTED 라이브러리에 건 순서 의존성만으로는 부족할 때가 있어,
+# 실제 빌드 타겟인 syxg50-jni에도 직접 건다 (AGP가 명시적 타겟 목록으로
+# ninja를 호출해도 build_madaha_core가 먼저 실행됨을 보장).
+add_dependencies(syxg50-jni build_madaha_core)
+
+target_link_libraries(syxg50-jni
+    madaha_core
+    ${log-lib}
+    ${aaudio-lib}
+    # Rust staticlib이 참조하는 libc/libm/pthread/dl은 NDK의 libc/libm에
+    # 이미 포함되어 있어 별도 링크가 필요 없다.
 )

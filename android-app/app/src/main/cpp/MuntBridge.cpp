@@ -169,6 +169,16 @@ static void synthThreadLoop() {
             g_synth->render(tmp, MIDI_SLICE_FRAMES);
         }
 
+        // 다른 엔진(SoundFont/S-YXG50) 대비 mt32emu 원본 출력이 체감상 작아서
+        // (실기기 확인) 게인을 주고 int16 클리핑만 방지한다.
+        constexpr float kGain = 2.2f;
+        for (int i = 0; i < MIDI_SLICE_FRAMES * 2; ++i) {
+            float v = (float)tmp[i] * kGain;
+            if (v > 32767.0f) v = 32767.0f;
+            if (v < -32768.0f) v = -32768.0f;
+            tmp[i] = (int16_t)v;
+        }
+
         for (int i = 0; i < MIDI_SLICE_FRAMES; ++i) {
             ring_push({tmp[i*2], tmp[i*2+1]});
         }
@@ -218,15 +228,20 @@ static bool startAAudio() {
     AAudioStreamBuilder_setChannelCount   (builder, 2);
     AAudioStreamBuilder_setFormat         (builder, AAUDIO_FORMAT_PCM_I16);
     AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-    AAudioStreamBuilder_setSharingMode    (builder, AAUDIO_SHARING_MODE_EXCLUSIVE);
+    // EXCLUSIVE는 지연이 낮지만 기기 내장 스피커 저지연 경로에만 고정되는
+    // 경우가 많아 유선/블루투스 이어폰·외부 스피커 라우팅이 안 되는 문제가
+    // 실기기에서 확인됐다 — 렌더는 이미 전용 스레드+링버퍼라 지터 문제는
+    // 없으므로 SHARED를 우선한다(AudioFlinger 믹서를 거쳐 출력 기기 전환을
+    // 정상적으로 따라감).
+    AAudioStreamBuilder_setSharingMode    (builder, AAUDIO_SHARING_MODE_SHARED);
     AAudioStreamBuilder_setDataCallback   (builder, aaCallback, nullptr);
     AAudioStreamBuilder_setFramesPerDataCallback(builder, CB_FRAMES);
     AAudioStreamBuilder_setBufferCapacityInFrames(builder, BUF_FRAMES);
 
     aaudio_result_t r = AAudioStreamBuilder_openStream(builder, &g_aaStream);
     if (r != AAUDIO_OK) {
-        LOGE("EXCLUSIVE 실패(%d), SHARED 재시도", r);
-        AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
+        LOGE("SHARED 실패(%d), EXCLUSIVE 재시도", r);
+        AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_EXCLUSIVE);
         r = AAudioStreamBuilder_openStream(builder, &g_aaStream);
     }
     AAudioStreamBuilder_delete(builder);

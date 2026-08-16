@@ -40,6 +40,7 @@ class SoundFontEngine(val ctx: Context) : IEngine {
     external fun nativeGetActiveVoices(): Int
     external fun nativeGetPresetCount(): Int
     external fun nativeGetChannelPresetName(channel: Int): String
+    external fun nativeGetChannelActiveMask(): Int
     external fun nativeGetVersion(): String
     external fun nativeGetSampleRate(): Int
 
@@ -182,6 +183,15 @@ class SoundFontEngine(val ctx: Context) : IEngine {
             val name = runCatching { nativeGetChannelPresetName(ch) }.getOrDefault("---")
             appendLine("CH${ch + 1}${if (ch == 9) "(Drum)" else ""}: $name")
         }
+    }
+
+    // MuntEngine의 LED 패널과 동일한 데이터 형태 (16채널용).
+    fun getPartInfo(): PartInfo {
+        val states = runCatching { nativeGetChannelActiveMask() }.getOrDefault(0).toLong()
+        val names = (0..15).map { ch ->
+            runCatching { nativeGetChannelPresetName(ch) }.getOrDefault("---").ifBlank { "---" }
+        }
+        return PartInfo(states, names)
     }
 
     override fun getNativeSampleRate(): Int = nativeGetSampleRate()

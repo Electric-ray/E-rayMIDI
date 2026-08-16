@@ -7,11 +7,21 @@
 - SC-55mk2 ROM 5종 (직접 준비, 미포함)
 - MT-32 ROM 2종: `MT32_CONTROL.ROM`, `MT32_PCM.ROM` (직접 준비, 미포함)
 - SF2 사운드폰트 파일 (선택 사항, SoundFont 모드용, 미포함)
+- S-YXG50 ROM 2종: `sxgbin41.tbl`, `sxgwave4.tbl` (직접 준비, 미포함)
+- **(S-YXG50 빌드용, v1.3 추가)**
+  - Rust stable 1.85 이상 — [rustup.rs](https://rustup.rs)로 설치 (edition 2024가
+    stable에 정식 지원되므로 nightly 불필요)
+  - Android 타겟 4종:
+    `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
+  - `cargo install cargo-ndk`
+  - LLVM/libclang — 일부 의존 크레이트가 bindgen으로 C 코드를 바인딩할 때 필요.
+    Windows: `winget install LLVM.LLVM` (설치 후 `LIBCLANG_PATH`를
+    `C:\Program Files\LLVM\bin`으로 설정, `CMakeLists.txt`에 이미 반영되어 있음)
 
 ## 2. 클론 및 코어 소스 준비
 
-이 저장소는 두 개의 신시사이저 코어 소스를 `android-app/app/src/main/cpp/` 아래에
-직접 포함하는 형태로 갖고 있습니다.
+이 저장소는 신시사이저 코어 소스들을 `android-app/app/src/main/cpp/` 아래에
+직접 포함(벤더링)하는 형태로 갖고 있습니다.
 
 **Nuked-SC55** (`cpp/nuked-sc55/`가 비어 있다면):
 ```cmd
@@ -32,8 +42,33 @@ robocopy munt_upstream\mt32emu munt\mt32emu /E /XD test
 `SamplerateAdapter.cpp`/`SoxrAdapter.cpp`는 외부 라이브러리(libsamplerate/soxr)가
 필요해 빌드 대상에서 제외되어 있습니다 (내부 리샘플러만 사용).
 
-TinySoundFont(`tsf.h`)는 `android-app/app/src/main/cpp/tsf/`에 이미 포함되어 있습니다
-(단일 헤더 라이브러리, 별도 클론 불필요).
+**FluidSynth** (`cpp/fluidsynth/`가 비어 있다면 — v1.3부터 TinySoundFont 대신 사용):
+```powershell
+$dir = "android-app\app\src\main\cpp\fluidsynth"
+New-Item -ItemType Directory -Force -Path $dir
+Invoke-WebRequest -Uri "https://github.com/FluidSynth/fluidsynth/releases/download/v2.6.0/fluidsynth-v2.6.0-android24.zip" -OutFile "$dir\fs.zip"
+Expand-Archive -Path "$dir\fs.zip" -DestinationPath $dir -Force
+Remove-Item "$dir\fs.zip"
+```
+공식 GitHub Release의 Android 프리빌트 바이너리를 그대로 씁니다(glib 의존성이
+빠진 2.5.0 이후 버전이라 별도로 크로스컴파일할 필요가 없습니다). 최신 릴리즈
+목록은 `https://github.com/FluidSynth/fluidsynth/releases` 참고.
+
+> 이 저장소에는 `lib/arm64-v8a/`만 커밋되어 있습니다(현재 `abiFilters`가
+> arm64-v8a 전용이라). 다른 ABI를 지원하려면 위 zip의 해당 ABI 폴더를 그대로
+> `lib/<abi>/`에 추가하면 됩니다.
+
+**madaha (S-YXG50)** (`cpp/madaha/`가 비어 있다면 — v1.3 신규):
+```cmd
+cd android-app\app\src\main\cpp
+git clone https://github.com/madaha-dev/madaha.git madaha
+```
+클론 후 `.git` 폴더는 지우고 벤더링 형태로 커밋합니다(이 저장소 자체가 아직
+git submodule을 안 쓰기 때문). madaha 소스에는 Android 이식을 위한 자체 패치가
+이미 적용되어 있습니다 — 원본 그대로 새로 클론하면 이 패치들이 사라지니, 실제로는
+**이 저장소에 이미 커밋되어 있는 `cpp/madaha/`를 그대로 쓰는 것을 권장**합니다.
+새 버전으로 업데이트하려면 README의 "v1.3에서 달라진 점 - 2"에 정리된 수정
+내역을 참고해서 다시 적용해야 합니다.
 
 ## 3. local.properties 설정
 
@@ -55,8 +90,14 @@ gradlew.bat assembleDebug
 
 빌드 결과물: `android-app\app\build\outputs\apk\debug\app-debug.apk`
 
-빌드 성공 시 세 개의 네이티브 라이브러리가 APK에 포함됩니다:
-`libnuked-sc55-jni.so`, `libmunt-jni.so`, `libsoundfont-jni.so`.
+CMake 구성 단계에서 `cargo-ndk`가 자동으로 `madaha_core`를 arm64-v8a용으로
+크로스컴파일합니다(처음 빌드할 때만 다소 걸릴 수 있음, 이후에는 cargo 자체가
+증분 빌드라 소스 변경이 없으면 빠릅니다).
+
+빌드 성공 시 다음 네이티브 라이브러리들이 APK에 포함됩니다:
+`libnuked-sc55-jni.so`, `libmunt-jni.so`, `libsoundfont-jni.so`,
+`libsyxg50-jni.so`, 그리고 FluidSynth의 의존 라이브러리 10개
+(`libfluidsynth.so` 등, `cpp/fluidsynth/lib/arm64-v8a/`에서 그대로 복사됨).
 
 ## 5. ROM / 사운드폰트 배치
 
@@ -73,6 +114,9 @@ adb push MT32_CONTROL.ROM /sdcard/Download/rom_munt/
 adb push MT32_PCM.ROM     /sdcard/Download/rom_munt/
 
 adb push MySoundFont.sf2 /sdcard/Download/soundfont/
+
+adb push sxgbin41.tbl  /sdcard/Download/rom_s-yxg50/
+adb push sxgwave4.tbl  /sdcard/Download/rom_s-yxg50/
 ```
 
 정확히 필요한 SC-55 ROM 파일명은 앱을 한 번 실행해서 "ROM 파일 안내" 버튼으로
@@ -94,28 +138,52 @@ USB MIDI 주변장치 모드를 쓰려면 기기의 개발자 옵션 또는 USB 
 
 ## 아키텍처 메모
 
-### 세 엔진의 공통 인터페이스 (`IEngine.kt`)
-`SC55Engine`, `MuntEngine`, `SoundFontEngine`은 모두 `IEngine`을 구현합니다.
-초기화(`initEngine`)는 엔진마다 필요한 리소스가 달라서(ROM 폴더 vs MT-32 ROM 2개
-vs .sf2 파일 경로) 인터페이스에 포함하지 않고, 재생/정지/MIDI 입력/리셋 등 공통
-런타임 동작만 통일했습니다. `MainActivity`는 이 인터페이스 하나로 세 엔진을
-동일한 방식으로 전환합니다.
+### 네 엔진의 공통 인터페이스 (`IEngine.kt`)
+`SC55Engine`, `MuntEngine`, `SoundFontEngine`, `SYXG50Engine`은 모두 `IEngine`을
+구현합니다. 초기화(`initEngine`)는 엔진마다 필요한 리소스가 달라서(ROM 폴더 vs
+MT-32 ROM 2개 vs .sf2 파일 경로 vs S-YXG50 ROM 2개) 인터페이스에 포함하지 않고,
+재생/정지/MIDI 입력/리셋 등 공통 런타임 동작만 통일했습니다. 채널별 LED 상태
+표시용 `PartInfo` 데이터 클래스도 `IEngine.kt`에 공용으로 정의되어 있고, 네
+엔진의 `getPartInfo()`가 전부 같은 형태로 반환합니다(`MainActivity`의 LED 패널
+빌더/업데이트 함수 하나가 네 엔진 전부를 처리). `MainActivity`는 `IEngine`
+하나로 네 엔진을 동일한 방식으로 전환합니다.
 
 ### 샘플레이트 전략
 - SC-55: 66207Hz 네이티브 고정 (리샘플링 금지 — 실제 SC-55mk2 출력 레이트)
 - MT-32: 32000Hz 네이티브 고정
-- SoundFont: 디바이스가 부여한 값 그대로 사용 (고정 레이트 제약 없음)
+- SoundFont / S-YXG50: 디바이스가 부여한 값 그대로 사용 (고정 레이트 제약 없음.
+  S-YXG50 내부적으로는 44100Hz 고정 소스를 madaha가 자체 리샘플링해서 디바이스
+  레이트로 출력)
 
-세 엔진은 상호 배타적으로만 동작(엔진 전환 시 이전 엔진을 완전히 `stop()`한 뒤에만
+네 엔진은 상호 배타적으로만 동작(엔진 전환 시 이전 엔진을 완전히 `stop()`한 뒤에만
 다음 엔진을 시작)하므로 공통 리샘플링 레이어나 AAudio 스트림 공유는 불필요합니다.
 각 엔진이 자신의 AAudio 스트림을 독립적으로 열고 닫습니다.
 
-### 오디오 렌더링 모델
-- **SC-55**: MCU 사이클 스텝을 전용 스레드에서 반복 호출(push 모델), PCM 출력은
-  AAudio 콜백에서 큐를 32 샘플 단위로 드레인.
-- **MT-32**: MIDI 이벤트 큐 + AAudio 콜백에서 슬라이스 단위로 드레인 후 렌더링.
-- **SoundFont**: MIDI 이벤트 처리는 별도의 일반 우선순위 스레드에서, 렌더링은
-  AAudio 실시간 콜백에서 수행하며 둘 사이는 짧은 뮤텍스로만 동기화합니다.
+### 오디오 렌더링 모델 (v1.3 — 네 엔진 모두 통일)
+네 엔진 모두 "전용 렌더 스레드가 미리 렌더링해 락프리 링버퍼에 채워두고, AAudio
+데이터 콜백은 그 링버퍼에서 pop만 한다"는 동일한 구조를 씁니다:
+
+```
+Kotlin 스레드 → MIDI 이벤트 큐(뮤텍스) → MIDI 처리 스레드 → 신스 엔진 API 호출
+                                                                    │
+전용 렌더 스레드가 신스를 계속 렌더링 ──────────────────────────────┘
+     │
+     ▼
+락프리 링버퍼 (head/tail atomic)
+     │
+     ▼
+AAudio 데이터 콜백 — 링버퍼에서 pop만 (절대 무거운 연산 안 함)
+```
+
+AAudio 콜백 안에서 렌더링을 직접 하면(v1.3 이전 SoundFont/S-YXG50이 이랬음)
+노트/화음이 많은 순간 렌더 비용이 튀면서 콜백의 엄격한 데드라인을 놓쳐 끊김+
+노이즈가 난다는 게 실기기 테스트로 확인되어, 모든 엔진을 이 구조로 통일했습니다.
+
+또한 네 엔진 모두 AAudio 스트림을 열 때 `AAUDIO_SHARING_MODE_SHARED`를 우선
+시도합니다(예전에는 지연을 낮추려고 `EXCLUSIVE`를 우선했으나, EXCLUSIVE 모드가
+기기 내장 스피커 저지연 경로에만 고정되어 유선/블루투스 이어폰·외부 스피커로
+라우팅이 안 되는 문제가 실기기에서 확인됨 — SHARED는 AudioFlinger 믹서를 거치므로
+출력 기기 전환을 정상적으로 따라감).
 
 ### LCD 렌더링 (SC-55 모드)
 `LCD_Render()`는 실제 물리 LCD처럼 "펌웨어가 화면을 갱신하는 도중" 상태를 그대로
@@ -131,6 +199,28 @@ Reset 패턴을 감지하면 MT-32 자체 리셋으로 해석해 기본 상태�
 MT-32 파트 채널배정을 전부 OFF로 끄는 SysEx(주소 `10 00 0D`~`15`, 값 `10`) 뒤에
 재배정이 잘못된 주소로 시도되어 실패하는 케이스도 감지해 그 SysEx 자체를 차단,
 파트가 영구히 무음이 되는 것을 방지합니다.
+
+### S-YXG50 / madaha 통합 구조 (v1.3 신규)
+madaha는 원래 리눅스 데스크톱 CLI(ALSA MIDI 입력 + cpal 오디오 출력)로 설계된
+Rust 프로그램입니다. Android 이식을 위해:
+
+- `Cargo.toml`에 `[lib] crate-type = ["staticlib", "rlib"]`을 추가하고,
+  `alsa`/`cpal`/`mimalloc` 의존성을 `desktop-io`라는 feature(기본 켜짐) 뒤로
+  격리했습니다. Android 빌드는 `--no-default-features`로 이 셋을 통째로
+  제외합니다.
+- `src/ffi.rs`가 Android용 C ABI 표면입니다: `madaha_init/destroy/send_midi/
+  send_sysex/render_i16/get_last_error` 등을 `#[unsafe(no_mangle)]`로 노출합니다.
+  ALSA Seq가 원래 대신 처리해주던 RPN/NRPN(CC98/99/100/101/6/38) 누적 로직을
+  여기서 직접 구현했습니다(패킷화된 MIDI 바이트만 들어오므로).
+- `madaha_init`의 실제 초기화 작업(Engine/AudioRender 생성 등)은 32MB 스택을
+  가진 전용 스레드에서 실행됩니다 — `Engine` 구조체 안에 정확히 8MB짜리
+  사전계산 테이블(`note_cent_table`)이 값으로 들어있어서, 기본 스택 크기의
+  스레드(특히 AAudio 실시간 콜백 스레드)에서 그대로 두면 스택 오버플로우로
+  죽습니다. 완성된 `Instance`는 그 전용 스레드 안에서 즉시 `Box`로 힙에 옮긴 뒤
+  포인터만 호출 스레드로 돌려받습니다.
+- CMake가 `cargo ndk`를 커스텀 빌드 타겟으로 호출해서 ABI별 `.a` 정적
+  라이브러리를 만들고, `SYXG50Bridge.cpp`와 함께 링크해 `libsyxg50-jni.so` 하나로
+  만듭니다(`app/src/main/cpp/CMakeLists.txt`의 `build_madaha_core` 타겟 참고).
 
 ### RTP-MIDI 안정성
 `RtpMidiSession.kt`는 다음을 처리합니다:
@@ -155,3 +245,12 @@ MT-32 파트 채널배정을 전부 OFF로 끄는 SysEx(주소 `10 00 0D`~`15`, 
 ### 32kHz/66207Hz 오디오 (SC-55 모드)
 SC-55 코어는 66207Hz로 오디오를 생성합니다. AAudio가 이 레이트를 직접 지원하지
 않는 기기에서는 OS가 폴백 레이트로 리샘플링합니다.
+
+### 엔진별 볼륨 게인 (v1.3)
+원본 코어 출력 레벨이 엔진마다 달라 체감 음량을 맞춰뒀습니다 — 값을 바꾸고
+싶다면 각 브리지 파일에서 찾을 수 있습니다:
+- `SC55Bridge.cpp`의 `sampleCallback()` 안 `kGain`(현재 2.4)
+- `MuntBridge.cpp`의 `synthThreadLoop()` 안 `kGain`(현재 2.2)
+- `FluidBridge.cpp`의 `nativeInit()` 안 `fluid_settings_setnum(..., "synth.gain", ...)`(현재 0.6)
+- `madaha/src/ffi.rs`의 `madaha_init` 안 `GainSink::new(raw_sink, 0.7, true)`
+  (게인 0.7 + tanh 소프트클립)

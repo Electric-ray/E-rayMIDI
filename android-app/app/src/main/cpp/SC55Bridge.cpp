@@ -313,7 +313,16 @@ static bool      s_resampleHaveFirst = false;
 static void sampleCallback(void* /*ud*/, const AudioFrame<int32_t>& frame) {
     AudioFrame<int16_t> out;
     Normalize(frame, out);
-    StereoS16 cur = {out.left, out.right};
+    // 다른 엔진들(SoundFont/S-YXG50/MT-32) 대비 SC-55 코어 원본 출력이
+    // 체감상 작아서(실기기 확인) 2.4배 게인을 주고 int16 클리핑만 방지한다.
+    constexpr float kGain = 2.4f;
+    auto boost = [](int16_t s) -> int16_t {
+        float v = (float)s * kGain;
+        if (v > 32767.0f) v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        return (int16_t)v;
+    };
+    StereoS16 cur = {boost(out.left), boost(out.right)};
 
     if (!s_srcEnabled.load(std::memory_order_relaxed)) {
         // AAudio granted the SC-55 core's true native rate - push 1:1,

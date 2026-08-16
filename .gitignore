@@ -19,6 +19,11 @@ build/
 **/CMakeCache.txt
 **/CMakeFiles/
 
+# Rust (madaha_core) — cargo/cargo-ndk 빌드 산출물. Cargo.lock은 재현 가능한
+# 빌드를 위해 커밋 대상(제외하지 않음).
+android-app/app/src/main/cpp/madaha/target/
+android-app/app/src/main/cpp/madaha/**/target/
+
 # Logs / misc
 *.log
 .DS_Store

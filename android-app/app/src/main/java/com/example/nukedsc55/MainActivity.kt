@@ -43,6 +43,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var rgEngine:     RadioGroup
     private lateinit var rbEngineSoundfont: RadioButton
     private lateinit var rbEngineMunt: RadioButton
+    private lateinit var rbEngineSyxg50: RadioButton
     private lateinit var layoutSoundFontPicker: LinearLayout
     private lateinit var tvSoundFontName: TextView
     private lateinit var btnPickSoundFont: Button
@@ -54,14 +55,20 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var romStatusRow: LinearLayout
     private lateinit var lcdFrame:    android.view.View
     private lateinit var ivLcd:       LcdView
-    private lateinit var tvInstrumentPanel: TextView
     private lateinit var llMuntPanel: LinearLayout
-    private val muntLeds = arrayOfNulls<android.view.View>(9)
-    private val muntPatchNames = arrayOfNulls<TextView>(9)
+    private lateinit var llSoundfontPanel: LinearLayout
+    private lateinit var llSyxg50Panel: LinearLayout
+    private lateinit var muntLeds: Array<android.view.View?>
+    private lateinit var muntNames: Array<TextView?>
+    private lateinit var sfLeds: Array<android.view.View?>
+    private lateinit var sfNames: Array<TextView?>
+    private lateinit var syxgLeds: Array<android.view.View?>
+    private lateinit var syxgNames: Array<TextView?>
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
     private lateinit var muntEngine: MuntEngine
+    private lateinit var syxg50Engine: SYXG50Engine
 
     // ── USB MIDI 주변장치(peripheral) 실제 연결 ──────────────────────
     // (munt-android 참고: UsbMidiDeviceService를 매니페스트에 등록해놓는 것만으로는
@@ -81,7 +88,29 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         val midiManager = getSystemService(Context.MIDI_SERVICE) as android.media.midi.MidiManager
         val midiHandler = Handler(usbMidiThread.looper)
 
+        // BUGFIX(버그 제보 대응): 리눅스/MiSTer 같은 호스트에서는 문제없이 붙는데,
+        // 일부 안드로이드 기기는 USB MIDI 주변장치(peripheral) 게이트웨이가 시간이
+        // 지나면 스스로 재협상되면서(원인 불명 — 안드로이드 플랫폼 쪽 USB 게이트웨이
+        // 이슈로 추정) 겉보기엔 "연결됨" 상태인데 실제로는 죽은 포트를 붙잡고 있게
+        // 되는 증상이 보고됨. 개발자설정에서 USB 연결모드를 MIDI가 아닌 걸로
+        // 바꿨다가 다시 MIDI로 바꾸면 살아나는데, 이는 시스템이 강제로 장치를
+        // 제거→재추가하기 때문 — 그런데 원래 코드는 onDeviceRemoved를 아예 처리
+        // 안 해서, 새 장치가 추가돼도 죽은 포트/디바이스 참조가 안 정리되고
+        // 남아있을 수 있었다. 아래에서 (a) 이미 연 장치를 다시 열려고 하면 무시,
+        // (b) 다른 장치가 새로 열리면 이전 것부터 확실히 닫고, (c) 열려있던 장치가
+        // 제거되면 참조를 정리하도록 고쳤다. 그래도 시스템이 이벤트 자체를 못 쏴주는
+        // "좀비" 상태까지는 소프트웨어로 막을 수 없어서, "초기화" 버튼을 누르면
+        // USB MIDI 연결을 강제로 닫았다 다시 여는 수동 복구 경로도 추가함(아래
+        // btnResetEngine 리스너 참고) — 개발자설정을 직접 안 건드려도 앱 안에서
+        // 복구할 수 있게.
         fun tryOpen(info: android.media.midi.MidiDeviceInfo) {
+            if (usbMidiOpenDevice?.info == info) return // 이미 이 장치로 연결되어 있음
+            // 다른 장치가 열려 있었다면 새로 열기 전에 확실히 정리
+            runCatching { usbMidiOutputPort?.close() }
+            runCatching { usbMidiOpenDevice?.close() }
+            usbMidiOutputPort = null
+            usbMidiOpenDevice = null
+
             midiManager.openDevice(info, { device ->
                 if (device == null) return@openDevice
                 usbMidiOpenDevice = device
@@ -98,9 +127,19 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // 연결 시점에 이미 보이는 장치 다 시도 (케이블이 이미 꽂혀 있는 경우)
         midiManager.devices.forEach { tryOpen(it) }
 
-        // 케이블을 연결하는 시점이 앱 실행 이후일 수도 있으므로, 새 장치가 나타나는 것도 감지
+        // 케이블을 연결하는 시점이 앱 실행 이후일 수도 있으므로, 새 장치가 나타나는 것도 감지.
+        // 장치가 사라지면(재협상/케이블 뽑힘 등) 참조도 같이 정리해서, 다음
+        // onDeviceAdded가 정상적으로 새 연결을 맺을 수 있게 한다.
         usbMidiDeviceCallback = object : android.media.midi.MidiManager.DeviceCallback() {
             override fun onDeviceAdded(info: android.media.midi.MidiDeviceInfo) { tryOpen(info) }
+            override fun onDeviceRemoved(info: android.media.midi.MidiDeviceInfo) {
+                if (usbMidiOpenDevice?.info != info) return
+                runCatching { usbMidiOutputPort?.close() }
+                runCatching { usbMidiOpenDevice?.close() }
+                usbMidiOutputPort = null
+                usbMidiOpenDevice = null
+                status("⚠️ USB MIDI 장치 연결 끊김 — 재연결 대기 중")
+            }
         }
         midiManager.registerDeviceCallback(usbMidiDeviceCallback!!, midiHandler)
     }
@@ -118,7 +157,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
 
     // 현재 연결을 시작한 엔진 (셋 중 하나만 동시에 돌릴 수 있음)
-    private enum class EngineType { SC55, SOUNDFONT, MUNT }
+    private enum class EngineType { SC55, SOUNDFONT, MUNT, SYXG50 }
     private var activeEngineType: EngineType? = null
 
     // 기기초기화 버튼이 지금 어느 엔진에 resetEngine()을 호출해야 하는지 공통적으로 찾기 위함
@@ -126,6 +165,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         EngineType.SC55 -> sc55Engine
         EngineType.SOUNDFONT -> sfEngine
         EngineType.MUNT -> muntEngine
+        EngineType.SYXG50 -> syxg50Engine
         null -> null
     }
 
@@ -186,8 +226,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private val instrumentPanelRunnable = object : Runnable {
         override fun run() {
             when (activeEngineType) {
-                EngineType.MUNT -> if (muntEngine.engineRunning) updateMuntPanel()
-                EngineType.SOUNDFONT -> if (sfEngine.engineRunning) tvInstrumentPanel.text = sfEngine.getChannelPanelText()
+                EngineType.MUNT -> if (muntEngine.engineRunning) updateLedPanel(muntLeds, muntNames, muntEngine.getPartInfo(), 8)
+                EngineType.SOUNDFONT -> if (sfEngine.engineRunning) updateLedPanel(sfLeds, sfNames, sfEngine.getPartInfo(), 9)
+                EngineType.SYXG50 -> if (syxg50Engine.engineRunning) updateLedPanel(syxgLeds, syxgNames, syxg50Engine.getPartInfo(), 9)
                 else -> {}
             }
             if (instrumentPanelRunning) uiHandler.postDelayed(this, INSTRUMENT_PANEL_INTERVAL_MS)
@@ -205,12 +246,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         uiHandler.removeCallbacks(instrumentPanelRunnable)
     }
 
-    // ── MT-32 LED 패널 (munt-android 원본 GUI 재현) ────────────────────
+    // ── LED 패널 공용 헬퍼 (원래 munt-android 원본 GUI 재현용이었던 것을
+    //    SoundFont/S-YXG50도 같은 방식으로 쓸 수 있게 일반화) ──────────────
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    private fun buildMuntPanelViews() {
-        if (llMuntPanel.childCount > 0) return
-        for (i in 0..8) {
+    private fun buildLedPanelViews(container: LinearLayout, labels: List<String>): Pair<Array<android.view.View?>, Array<TextView?>> {
+        val leds = arrayOfNulls<android.view.View>(labels.size)
+        val names = arrayOfNulls<TextView>(labels.size)
+        for (i in labels.indices) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -226,37 +269,42 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 }
             }
             val label = TextView(this).apply {
-                text = if (i < 8) "CH${i + 2}" else "CH10"
+                text = labels[i]
                 setTextColor(0xFF888888.toInt())
                 textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(dp(48), LinearLayout.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams(dp(40), LinearLayout.LayoutParams.WRAP_CONTENT)
             }
             val patch = TextView(this).apply {
                 text = "---"
                 setTextColor(0xFF00FF88.toInt())
-                textSize = 12f
+                textSize = 11f
                 typeface = android.graphics.Typeface.MONOSPACE
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }
             row.addView(led); row.addView(label); row.addView(patch)
-            llMuntPanel.addView(row)
-            muntLeds[i] = led
-            muntPatchNames[i] = patch
+            container.addView(row)
+            leds[i] = led
+            names[i] = patch
         }
+        return leds to names
     }
 
-    private fun updateMuntPanel() {
-        val info = muntEngine.getPartInfo()
-        for (i in 0..8) {
+    private fun updateLedPanel(
+        leds: Array<android.view.View?>, names: Array<TextView?>,
+        info: PartInfo, rhythmIndex: Int?
+    ) {
+        for (i in leds.indices) {
             val on = (info.states shr i) and 1L != 0L
-            val rhy = i == 8
+            val rhy = (i == rhythmIndex)
             val color = when {
                 on && rhy -> LED_RHY_ON
                 on        -> LED_ON
                 rhy       -> LED_RHY_OFF
                 else      -> LED_OFF
             }
-            (muntLeds[i]?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-            muntPatchNames[i]?.text = info.names.getOrElse(i) { "---" }
+            (leds[i]?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
+            names[i]?.text = info.names.getOrElse(i) { "---" }
         }
     }
 
@@ -270,11 +318,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         sfEngine.onStatus = { msg -> status(msg) }
         muntEngine = MuntEngine(this)
         muntEngine.onStatus = { msg -> status(msg) }
+        syxg50Engine = SYXG50Engine(this)
+        syxg50Engine.onStatus = { msg -> status(msg) }
 
         rgConnection = findViewById(R.id.rgConnection)
         rgEngine     = findViewById(R.id.rgEngine)
         rbEngineSoundfont = findViewById(R.id.rbEngineSoundfont)
         rbEngineMunt = findViewById(R.id.rbEngineMunt)
+        rbEngineSyxg50 = findViewById(R.id.rbEngineSyxg50)
         layoutSoundFontPicker = findViewById(R.id.layoutSoundFontPicker)
         tvSoundFontName = findViewById(R.id.tvSoundFontName)
         btnPickSoundFont = findViewById(R.id.btnPickSoundFont)
@@ -286,9 +337,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         romStatusRow = findViewById(R.id.romStatusRow)
         lcdFrame    = findViewById(R.id.lcdFrame)
         ivLcd       = findViewById(R.id.ivLcd)
-        tvInstrumentPanel = findViewById(R.id.tvInstrumentPanel)
         llMuntPanel = findViewById(R.id.llMuntPanel)
-        buildMuntPanelViews()
+        llSoundfontPanel = findViewById(R.id.llSoundfontPanel)
+        llSyxg50Panel = findViewById(R.id.llSyxg50Panel)
+        val muntLabels = (2..9).map { "CH$it" } + "CH10"
+        val ch16Labels = (1..16).map { "CH$it" }
+        buildLedPanelViews(llMuntPanel, muntLabels).let { (l, n) -> muntLeds = l; muntNames = n }
+        buildLedPanelViews(llSoundfontPanel, ch16Labels).let { (l, n) -> sfLeds = l; sfNames = n }
+        buildLedPanelViews(llSyxg50Panel, ch16Labels).let { (l, n) -> syxgLeds = l; syxgNames = n }
         // FIX (깜빡임): nativeGetLcdFrame()이 JNI AndroidBitmap_lockPixels/unlockPixels로
         // 비트맵 픽셀을 직접 쓰는데, 이런 native 측 픽셀 변경은 HWUI가
         // 텍스처 재업로드 여부를 판단하는 generation 카운터를 거치지 않아,
@@ -313,6 +369,15 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 it.resetEngine(true)
                 status("🔄 기기 초기화됨")
             }
+            // USB MIDI기기 모드에서 "연결은 됐는데 소리가 안 나오는" 좀비 상태
+            // 제보 대응: 시스템이 onDeviceRemoved/onDeviceAdded를 못 쏴주는
+            // 경우까지는 자동 복구가 안 되니, 초기화 버튼을 누르면 USB MIDI
+            // 연결 자체도 강제로 닫았다 다시 열어서 수동 복구 경로를 제공한다.
+            if (findViewById<RadioButton>(R.id.rbConnUsbMidi).isChecked && activeEngineType != null) {
+                stopUsbMidiPeripheral()
+                startUsbMidiPeripheral()
+                status("🔄 USB MIDI 연결 재시작됨")
+            }
         }
         btnRomHelp.setOnClickListener { showRomHelp() }
 
@@ -327,7 +392,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // 화면 갱신(LCD 또는 악기패널)만 다시 켜준다.
         when (activeEngineType) {
             EngineType.SC55 -> startLcdUpdates()
-            EngineType.MUNT, EngineType.SOUNDFONT -> startInstrumentPanel()
+            EngineType.MUNT, EngineType.SOUNDFONT, EngineType.SYXG50 -> startInstrumentPanel()
             null -> {}
         }
     }
@@ -346,13 +411,15 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun onEngineSelectionChanged() {
         val isSoundFont = rbEngineSoundfont.isChecked
         val isMunt = rbEngineMunt.isChecked
+        val isSyxg50 = rbEngineSyxg50.isChecked
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        // LCD는 SC-55 전용 (munt/SoundFont는 실제 LCD 컨트롤러 에뮬레이션이 없음)
-        lcdFrame.visibility = if (!isSoundFont && !isMunt) android.view.View.VISIBLE else android.view.View.GONE
-        // 악기명 패널은 각 엔진별로 분리 (MUNT는 LED패널, SoundFont는 텍스트패널)
+        // LCD는 SC-55 전용 (munt/SoundFont/S-YXG50는 실제 LCD 컨트롤러 에뮬레이션이 없음)
+        lcdFrame.visibility = if (!isSoundFont && !isMunt && !isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
+        // 악기명 패널은 세 엔진 다 같은 LED 패널 스타일(엔진당 하나씩)
         llMuntPanel.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
-        tvInstrumentPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
+        llSoundfontPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
+        llSyxg50Panel.visibility = if (isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
+        // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt/S-YXG50에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()
         else updateRomStatus()
@@ -502,8 +569,16 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             tvRomStatus.text = "파일 접근 권한 없음"
             return
         }
-        val romDirPath = if (rbEngineMunt.isChecked) muntEngine.ROM_DIR else sc55Engine.ROM_DIR
-        val needed = if (rbEngineMunt.isChecked) muntEngine.getRomFileList() else sc55Engine.getRomFileList()
+        val romDirPath = when {
+            rbEngineMunt.isChecked -> muntEngine.ROM_DIR
+            rbEngineSyxg50.isChecked -> syxg50Engine.ROM_DIR
+            else -> sc55Engine.ROM_DIR
+        }
+        val needed = when {
+            rbEngineMunt.isChecked -> muntEngine.getRomFileList()
+            rbEngineSyxg50.isChecked -> syxg50Engine.getRomFileList()
+            else -> sc55Engine.getRomFileList()
+        }
         val romDir = File(romDirPath)
         if (needed.isEmpty()) { tvRomStatus.text = "ROM 목록 조회 중…"; return }
         val found   = needed.count { File(romDir, it).exists() }
@@ -515,7 +590,11 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
 
     private fun showRomHelp() {
-        val helpText = if (rbEngineMunt.isChecked) muntEngine.getRomHelpText() else sc55Engine.getRomHelpText()
+        val helpText = when {
+            rbEngineMunt.isChecked -> muntEngine.getRomHelpText()
+            rbEngineSyxg50.isChecked -> syxg50Engine.getRomHelpText()
+            else -> sc55Engine.getRomHelpText()
+        }
         AlertDialog.Builder(this)
             .setTitle("ROM 파일 안내")
             .setMessage(helpText)
@@ -527,6 +606,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun onConnectClicked() {
         val useSoundFont = rbEngineSoundfont.isChecked
         val useMunt = rbEngineMunt.isChecked
+        val useSyxg50 = rbEngineSyxg50.isChecked
         val useRtp = findViewById<RadioButton>(R.id.rbConnRtp).isChecked
         val useUsbMidiDevice = findViewById<RadioButton>(R.id.rbConnUsbMidi).isChecked
 
@@ -566,6 +646,12 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             activeEngineType = EngineType.MUNT
             if (!useUsbMidiDevice) EngineRegistry.active = muntEngine
             startInstrumentPanel()
+        } else if (useSyxg50) {
+            if (!syxg50Engine.initEngine()) return
+            if (!startInputPath(syxg50Engine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
+            activeEngineType = EngineType.SYXG50
+            if (!useUsbMidiDevice) EngineRegistry.active = syxg50Engine
+            startInstrumentPanel()
         } else {
             if (!sc55Engine.initEngine()) return
             if (!startInputPath(sc55Engine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
@@ -592,6 +678,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             EngineType.SC55 -> { sc55Engine.allNotesOff(); sc55Engine.stop() }
             EngineType.SOUNDFONT -> { sfEngine.allNotesOff(); sfEngine.stop() }
             EngineType.MUNT -> { muntEngine.allNotesOff(); muntEngine.stop() }
+            EngineType.SYXG50 -> { syxg50Engine.allNotesOff(); syxg50Engine.stop() }
             null -> {}
         }
         activeEngineType = null
