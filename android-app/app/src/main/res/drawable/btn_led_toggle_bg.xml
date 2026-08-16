@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 모드/커넥션 선택용 토글 버튼 배경 (RadioButton android:background로 사용) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#1f3a2e" />
+            <corners android:radius="4dp" />
+            <stroke android:width="1dp" android:color="#00cc88" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#1c1c1f" />
+            <corners android:radius="4dp" />
+            <stroke android:width="1dp" android:color="#3a3a3e" />
+        </shape>
+    </item>
+</selector>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 기기초기화용 물리 버튼 (주황/호박색 계열, 레퍼런스 이미지의 RESET 버튼 느낌) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#3a2410" />
+            <corners android:radius="6dp" />
+            <stroke android:width="1dp" android:color="#8a5a2a" />
+        </shape>
+    </item>
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#26262a" />
+            <corners android:radius="6dp" />
+            <stroke android:width="1dp" android:color="#3a3a3e" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="90"
+                android:startColor="#a06a2a"
+                android:endColor="#553311"
+                android:type="linear" />
+            <corners android:radius="6dp" />
+            <stroke android:width="1dp" android:color="#caa060" />
+        </shape>
+    </item>
+</selector>

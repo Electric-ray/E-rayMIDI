@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 꺼짐 LED 도트 (어두운 적갈색 - 불 꺼진 LED 렌즈) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#4a2020" />
+    <size android:width="10dp" android:height="10dp" />
+</shape>

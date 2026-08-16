@@ -1,0 +1,34 @@
+// Voice Module — Sound Bank Data Loader
+//
+// This module provides a unified interface for loading instrument wavetable data
+// from different sound bank file formats:
+//   - Yamaha SYXG (.tbl) — SYXG-50, SYXG-2006 LE, etc.
+//   - Wingroove (.bin) — Wingroove sound bank files
+//
+// The module abstracts the underlying format differences and exposes a single
+// interface: given (msb, lsb, program, note, velocity), it returns the
+// corresponding waveform object for audio rendering.
+//
+// Internal structure:
+//   - Header parsing and format detection
+//   - Sample data loading and decryption
+//   - Instrument/envelope parameter extraction
+
+mod voice_manager;
+mod drum_setup;
+mod keys;
+mod parser;
+mod program;
+mod sample_meta;
+
+pub use drum_setup::{DrumSetupEntry, DEFAULT_DRUM_SETUP};
+
+pub use keys::Key;
+pub use program::Program;
+pub use sample_meta::SampleMeta;
+pub use voice_manager::DRUM_BANK_MSB_GM2;
+pub use voice_manager::DRUM_BANK_MSB_GS;
+pub use voice_manager::DRUM_BANK_MSB_XG;
+pub use voice_manager::Instruments;
+pub use voice_manager::SFX_BANK_MSB_XG;
+pub use voice_manager::VoiceManager;

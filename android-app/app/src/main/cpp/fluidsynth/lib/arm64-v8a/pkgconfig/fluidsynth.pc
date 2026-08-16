@@ -1,0 +1,12 @@
+prefix=/home/vsts/work/1/s/android-build-root/opt/android
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: FluidSynth
+Description: Software SoundFont synth
+Version: 2.6.0
+Requires.private: sndfile oboe-1.0
+Libs: -L${libdir} -lfluidsynth
+Libs.private: -lm -llog -lOpenSLES
+Cflags: -I${includedir}
