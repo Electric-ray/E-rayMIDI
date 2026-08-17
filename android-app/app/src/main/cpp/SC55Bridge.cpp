@@ -315,6 +315,8 @@ static void sampleCallback(void* /*ud*/, const AudioFrame<int32_t>& frame) {
     Normalize(frame, out);
     // 다른 엔진들(SoundFont/S-YXG50/MT-32) 대비 SC-55 코어 원본 출력이
     // 체감상 작아서(실기기 확인) 2.4배 게인을 주고 int16 클리핑만 방지한다.
+    // (리버브 꼬리 증폭 가설은 게인 1.0으로도 증상이 그대로여서 기각됨 —
+    // 버그 제보 조사 기록)
     constexpr float kGain = 2.4f;
     auto boost = [](int16_t s) -> int16_t {
         float v = (float)s * kGain;

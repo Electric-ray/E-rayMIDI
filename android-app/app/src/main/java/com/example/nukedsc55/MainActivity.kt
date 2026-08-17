@@ -84,6 +84,42 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
     private val usbMidiParser = MidiStreamParser { bytes -> EngineRegistry.active?.dispatchMidi(bytes) }
 
+    // BUGFIX(버그 제보 대응 — 빠른 곡에서 USB MIDI만 끊김+노이즈): USB는
+    // RTP-MIDI(WiFi)보다 훨씬 빨라서, 화음/아르페지오가 거의 동시에 onSend()로
+    // 몰려 들어올 수 있다. 원래는 onSend() 안에서(=THREAD_PRIORITY_URGENT_AUDIO로
+    // 도는 usbMidiThread에서 그대로) 파싱+디스패치까지 다 처리했는데, RTP-MIDI 쪽
+    // 스레드도 같은 우선순위이긴 하지만 WiFi 특성상 이벤트가 자연히 퍼져서
+    // 들어오는 반면 USB는 짧은 시간에 몰아치기 때문에, 그 순간 급한 우선순위
+    // 스레드가 CPU를 오래 붙잡으며 오디오 렌더 스레드와 경합해 끊김을 유발하는
+    // 것으로 추정된다. onSend()는 큐에 넣기만 하고 즉시 리턴하게 하고, 실제
+    // 파싱/디스패치는 한 단계 낮은 우선순위의 별도 드레인 스레드가 처리하도록
+    // 분리했다 — 다른 엔진 브리지들(SC55/SoundFont/S-YXG50)이 이미 쓰고 있는
+    // "큐 + 전용 처리 스레드" 패턴과 동일한 원리.
+    private val usbMidiQueue = java.util.concurrent.LinkedBlockingQueue<ByteArray>()
+    private var usbMidiDrainThread: Thread? = null
+    @Volatile private var usbMidiDrainRunning = false
+
+    private fun startUsbMidiDrainThread() {
+        if (usbMidiDrainRunning) return
+        usbMidiDrainRunning = true
+        usbMidiDrainThread = Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+            while (usbMidiDrainRunning) {
+                val chunk = try {
+                    usbMidiQueue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (e: InterruptedException) { null }
+                if (chunk != null) usbMidiParser.feed(chunk)
+            }
+        }, "UsbMidiDrainThread").apply { isDaemon = true; start() }
+    }
+
+    private fun stopUsbMidiDrainThread() {
+        usbMidiDrainRunning = false
+        usbMidiDrainThread?.interrupt()
+        usbMidiDrainThread = null
+        usbMidiQueue.clear()
+    }
+
     private fun startUsbMidiPeripheral() {
         val midiManager = getSystemService(Context.MIDI_SERVICE) as android.media.midi.MidiManager
         val midiHandler = Handler(usbMidiThread.looper)
@@ -117,12 +153,17 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 usbMidiOutputPort = device.openOutputPort(0)
                 usbMidiOutputPort?.connect(object : android.media.midi.MidiReceiver() {
                     override fun onSend(data: ByteArray, offset: Int, count: Int, timestamp: Long) {
-                        usbMidiParser.feed(if (offset == 0 && count == data.size) data else data.copyOfRange(offset, offset + count))
+                        // 파싱/디스패치는 여기서 하지 않는다 — 이 콜백은 URGENT_AUDIO
+                        // 우선순위 스레드에서 실행되므로, 큐에 넣고 즉시 리턴만 한다
+                        // (실제 처리는 usbMidiDrainThread가 함, 위 주석 참고).
+                        usbMidiQueue.offer(if (offset == 0 && count == data.size) data else data.copyOfRange(offset, offset + count))
                     }
                 })
                 status("✅ USB MIDI 장치 연결됨")
             }, midiHandler)
         }
+
+        startUsbMidiDrainThread()
 
         // 연결 시점에 이미 보이는 장치 다 시도 (케이블이 이미 꽂혀 있는 경우)
         midiManager.devices.forEach { tryOpen(it) }
@@ -145,6 +186,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
 
     private fun stopUsbMidiPeripheral() {
+        stopUsbMidiDrainThread()
         usbMidiDeviceCallback?.let {
             val midiManager = getSystemService(Context.MIDI_SERVICE) as android.media.midi.MidiManager
             runCatching { midiManager.unregisterDeviceCallback(it) }
