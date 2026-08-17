@@ -23,7 +23,7 @@ DOS PC(또는 다른 MIDI 소스)에서 나가는 MIDI 신호를 안드로이드
 
 ```
                  ┌─ RTP-MIDI (WiFi, ESP32 경유)
-DOS PC/호스트 ───┼─ USB 시리얼 (ESP32 경유, OTG)
+DOS PC/호스트 ───┼─ USB 시리얼 (rs232 to USB 널모뎀케이블)
                  └─ USB MIDI 주변장치 (케이블로 PC와 직결, 안드로이드가 표준 MIDI 장치로 인식됨)
                                 │
                                 ▼
