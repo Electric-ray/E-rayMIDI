@@ -51,6 +51,7 @@ class MuntEngine(val ctx: Context) : IEngine {
     external fun nativeResetSynth()
     external fun nativeGetStats(): String
     external fun nativeGetSampleRate(): Int
+    external fun nativeGetDisplayState(): String
 
     private var rtpSession: RtpMidiSession? = null
     private var usbMgr: UsbMidiManager? = null
@@ -265,6 +266,13 @@ class MuntEngine(val ctx: Context) : IEngine {
         val names = map["names"]?.split(",") ?: emptyList()
         return PartInfo(states, names)
     }
+
+    // 실제 MT-32/CM-32L LCD 텍스트(PC용 munt와 동일한 문자열 — 활성 파트는
+    // 풀블록으로, Rhythm은 'R', "!vol:NNN" 마스터 볼륨까지). CGRAM 풀블록
+    // 글리프(문자값 1)는 화면에 그릴 수 없어서 유니코드 풀블록(█)으로 치환.
+    fun getLcdText(): String =
+        runCatching { nativeGetDisplayState() }.getOrDefault("")
+            .replace('\u0001', '█')
 
     override fun stop() {
         stopRtp(); stopUsb()

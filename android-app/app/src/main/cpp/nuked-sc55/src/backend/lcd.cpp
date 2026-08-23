@@ -382,10 +382,25 @@ void LCD_Render(lcd_t& lcd)
 
         if (!lcd.enable && !lcd.mcu->is_jv880)
         {
+            // BUGFIX (외부 리뷰로 확인/실증됨 — Galaxy A50/구형 Android 10 기기
+            // 등에서 "LCD가 여러 장 겹쳐 보인다"/체크무늬 노이즈 제보): 원래
+            // lcd.mutex는 위에서 LCD_C/LCD_DD_RAM/LCD_CG/LCD_Data(=MCU가 쓰는
+            // 상태)만 보호하고 곧바로 풀렸다. lcd.buffer(실제 픽셀 프레임버퍼)는
+            // 이 지점부터 폰트 렌더링이 끝날 때까지 전혀 보호되지 않은 채로
+            // 그려지고 있었는데, Android 쪽 nativeGetLcdFrame()은 "lcd.mutex를
+            // 잡았으니 안전하다"고 가정하고 바로 이 lcd.buffer를 memcpy해갔다 —
+            // 즉 뮤텍스가 보호하는 대상과 실제로 동시접근이 일어나는 대상이
+            // 서로 달라서, 그림이 절반쯤 그려진 프레임을 그대로 읽어가는 진짜
+            // data race였다. 픽셀을 쓰는 구간 전체를 같은 뮤텍스로 감싸서
+            // (LCD_Write 자체는 몇 ns짜리라 여기서 좀 오래 잡고 있어도 MCU
+            // 스레드가 눈에 띄게 밀리지 않는다), Android 쪽 read와 절대
+            // 겹치지 않게 한다.
+            std::scoped_lock bufferLock(lcd.mutex);
             memset(lcd.buffer, 0, sizeof(lcd.buffer));
         }
         else
         {
+            std::scoped_lock bufferLock(lcd.mutex);
             if (lcd.mcu->is_jv880)
             {
                 for (size_t i = 0; i < lcd.height; i++) {

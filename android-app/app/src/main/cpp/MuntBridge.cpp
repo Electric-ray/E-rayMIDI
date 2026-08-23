@@ -435,4 +435,19 @@ Java_com_example_nukedsc55_MuntEngine_nativeGetStats(JNIEnv* env,jobject) {
     return env->NewStringUTF(buf);
 }
 
+// ── nativeGetDisplayState (신규) ──────────────────────────────────────────
+// mt32emu가 자체적으로 에뮬레이션하는 실제 MT-32/CM-32L LCD 텍스트를 그대로
+// 가져온다 (Display.cpp — Part1~5는 활성 시 문자값 1(CGRAM 풀블록 글리프)로
+// 대체되고, Rhythm은 'R', 뒤에 "!vol:NNN" 형태의 마스터 볼륨 텍스트가 붙는다.
+// PC용 munt(mt32-qt 등)가 보여주는 것과 동일한 문자열). Kotlin 쪽에서 문자값
+// 1을 화면에 그릴 수 있는 블록 문자로 치환해서 그대로 표시한다.
+JNIEXPORT jstring JNICALL
+Java_com_example_nukedsc55_MuntEngine_nativeGetDisplayState(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> lk(g_mtx);
+    if (!g_synth) return env->NewStringUTF("");
+    char buf[32] = {0};
+    g_synth->getDisplayState(buf, false);
+    return env->NewStringUTF(buf);
+}
+
 } // extern "C"

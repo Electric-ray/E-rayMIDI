@@ -55,7 +55,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var romStatusRow: LinearLayout
     private lateinit var lcdFrame:    android.view.View
     private lateinit var ivLcd:       LcdView
+    private lateinit var llMuntContainer: LinearLayout
     private lateinit var llMuntPanel: LinearLayout
+    private lateinit var muntLcdView: MuntLcdView
     private lateinit var llSoundfontPanel: LinearLayout
     private lateinit var llSyxg50Panel: LinearLayout
     private lateinit var muntLeds: Array<android.view.View?>
@@ -268,7 +270,10 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private val instrumentPanelRunnable = object : Runnable {
         override fun run() {
             when (activeEngineType) {
-                EngineType.MUNT -> if (muntEngine.engineRunning) updateLedPanel(muntLeds, muntNames, muntEngine.getPartInfo(), 8)
+                EngineType.MUNT -> if (muntEngine.engineRunning) {
+                    updateLedPanel(muntLeds, muntNames, muntEngine.getPartInfo(), 8)
+                    muntLcdView.setText(muntEngine.getLcdText())
+                }
                 EngineType.SOUNDFONT -> if (sfEngine.engineRunning) updateLedPanel(sfLeds, sfNames, sfEngine.getPartInfo(), 9)
                 EngineType.SYXG50 -> if (syxg50Engine.engineRunning) updateLedPanel(syxgLeds, syxgNames, syxg50Engine.getPartInfo(), 9)
                 else -> {}
@@ -379,7 +384,9 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         romStatusRow = findViewById(R.id.romStatusRow)
         lcdFrame    = findViewById(R.id.lcdFrame)
         ivLcd       = findViewById(R.id.ivLcd)
+        llMuntContainer = findViewById(R.id.llMuntContainer)
         llMuntPanel = findViewById(R.id.llMuntPanel)
+        muntLcdView = findViewById(R.id.muntLcdView)
         llSoundfontPanel = findViewById(R.id.llSoundfontPanel)
         llSyxg50Panel = findViewById(R.id.llSyxg50Panel)
         val muntLabels = (2..9).map { "CH$it" } + "CH10"
@@ -458,7 +465,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // LCD는 SC-55 전용 (munt/SoundFont/S-YXG50는 실제 LCD 컨트롤러 에뮬레이션이 없음)
         lcdFrame.visibility = if (!isSoundFont && !isMunt && !isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
         // 악기명 패널은 세 엔진 다 같은 LED 패널 스타일(엔진당 하나씩)
-        llMuntPanel.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        llMuntContainer.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
         llSoundfontPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
         llSyxg50Panel.visibility = if (isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
         // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt/S-YXG50에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
@@ -534,9 +541,30 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
 
     // 백그라운드 스레드에서 실행: native 프레임을 "쓰기용" 비트맵에 채우고,
     // 완료되면 UI 스레드에 "이제 이 비트맵을 보여줘"라고 가볍게 알린다.
+    //
+    // BUGFIX (버그 제보 대응 — "LCD 화면이 여러 개 겹쳐 보인다"/체크무늬 노이즈,
+    // 느린 기기 Android 10/Galaxy A50 등에서 재현): 원래는 버퍼 개수(3개)만큼
+    // 라운드로빈으로 돌리면 안전할 거라는 "타이머 기준 추측"만으로 픽셀을 덮어썼다.
+    // 느린 기기에서 onDraw()가 그 여유 시간(약 150ms)보다 오래 걸리면, 화면에
+    // 그려지고 있는 바로 그 비트맵을 네이티브 스레드가 동시에 write하게 되어
+    // 절반은 이전 프레임 절반은 새 프레임이 섞인 "찢어진" 이미지가 나왔다.
+    // 이제 LcdView가 노출하는 실제 상태(지금 세팅된 비트맵 / 지금 onDraw()가
+    // 실제로 읽고 있는 비트맵)를 확인해서, 그 어느 쪽에도 해당하지 않는
+    // "확실히 안전한" 버퍼를 찾을 때까지 다음 버퍼를 시도한다. 셋 다 위험하면
+    // (매우 드묾 — 기기가 극도로 느린 경우) 이번 프레임은 그냥 건너뛴다
+    // (픽셀이 찢어지는 것보다 프레임 하나 스킵하는 게 훨씬 낫다).
     private fun renderLcdFrameOnBgThread() {
         if (!sc55Engine.engineRunning) return
-        val target = lcdBitmaps[writeIdx] ?: return
+
+        var target: Bitmap? = null
+        for (attempt in 0 until NUM_LCD_BUFFERS) {
+            val candidate = lcdBitmaps[writeIdx] ?: return
+            val unsafe = candidate === ivLcd.getActiveBitmap() || ivLcd.isBeingDrawn(candidate)
+            if (!unsafe) { target = candidate; break }
+            writeIdx = (writeIdx + 1) % NUM_LCD_BUFFERS
+        }
+        if (target == null) return // 셋 다 사용 중 — 이번 프레임 스킵
+
         val ok = sc55Engine.nativeGetLcdFrame(target)
         if (!ok) return
         ivLcd.setFrame(target)
