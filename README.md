@@ -4,6 +4,19 @@ Roland SC-55 / MT-32 / SoundFont(SF2) / **S-YXG50(YAMAHA XG)** 네 가지 재생
 RTP-MIDI(WiFi) / USB 시리얼 / USB MIDI 주변장치(peripheral) 세 가지 연결 방식을
 하나로 통합한 Android MIDI 재생 앱입니다.
 
+
+
+https://github.com/user-attachments/assets/527aa40e-b534-4c0e-bc5c-3464fcb0e702
+
+
+
+
+https://github.com/user-attachments/assets/fb366aac-3d51-4342-96ac-d7def23d242d
+
+
+
+
+
 원래는 [nukeykt/Nuked-SC55](https://github.com/nukeykt/Nuked-SC55)의 Android 포팅으로
 시작했지만, [munt](https://github.com/munt/munt)(MT-32/CM-32L), FluidSynth(SF2),
 [madaha](https://github.com/madaha-dev/madaha)(S-YXG50) 코어를 함께 통합하면서
