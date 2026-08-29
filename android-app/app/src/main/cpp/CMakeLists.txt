@@ -51,9 +51,11 @@ target_compile_options(nuked-sc55-jni PRIVATE
     -O3
     -ffast-math
     -fomit-frame-pointer
+    -flto=thin
     # Android compat: std::unreachable polyfill (C++23, not in NDK28 libc++)
     -include ${CMAKE_CURRENT_SOURCE_DIR}/android_compat.h
 )
+target_link_options(nuked-sc55-jni PRIVATE -flto=thin)
 
 # Android-specific defines to suppress platform-specific code in the backend
 target_compile_definitions(nuked-sc55-jni PRIVATE
@@ -189,6 +191,16 @@ set(MT32EMU_DEFINES
 
 add_library(mt32emu STATIC ${MT32EMU_SRCS})
 
+# BUGFIX(코드 최적화 리뷰로 발견): 다른 세 엔진(nuked-sc55-jni/soundfont-jni,
+# 그리고 Cargo release 프로파일을 쓰는 madaha_core)은 전부 target_compile_options로
+# -O3를 명시했는데 mt32emu/munt-jni만 빠져 있었다. build.gradle.kts에도
+# CMAKE_BUILD_TYPE을 명시적으로 지정하지 않아서, 우리가 계속 테스트해온
+# assembleDebug 빌드에서는 이 타겟만 AGP 기본값(Debug → 최적화 없는 -O0)으로
+# 빌드되고 있었을 가능성이 높다 — 지금까지 MT-32 성능/게인 테스트가 전부
+# 최적화 안 된 코드 기준이었다는 뜻이라 실제 배포 빌드에서는 여유가 훨씬
+# 클 것으로 예상된다. 다른 엔진과 동일하게 명시적으로 강제한다.
+target_compile_options(mt32emu PRIVATE -O3 -fomit-frame-pointer -flto=thin)
+
 target_include_directories(mt32emu PUBLIC
     ${MT32EMU_ROOT}
     ${MT32EMU_ROOT}/sha1
@@ -204,7 +216,9 @@ add_library(
     MuntBridge.cpp
 )
 
+target_compile_options(munt-jni PRIVATE -O3 -fomit-frame-pointer -flto=thin)
 target_compile_definitions(munt-jni PRIVATE ${MT32EMU_DEFINES})
+target_link_options(munt-jni PRIVATE -flto=thin)
 
 target_link_libraries(munt-jni
     mt32emu
@@ -282,6 +296,11 @@ add_library(
 # 실제 빌드 타겟인 syxg50-jni에도 직접 건다 (AGP가 명시적 타겟 목록으로
 # ninja를 호출해도 build_madaha_core가 먼저 실행됨을 보장).
 add_dependencies(syxg50-jni build_madaha_core)
+
+# 실제 렌더링은 madaha_core(Rust, 이미 Cargo release 프로파일로 opt-level=3)가
+# 하지만, 이 브리지 자체(링버퍼 push/pop 루프, AAudio 콜백)도 다른 세 엔진과
+# 일관되게 최적화한다 (코드 최적화 리뷰로 확인 — 여기만 빠져 있었음).
+target_compile_options(syxg50-jni PRIVATE -O3 -fomit-frame-pointer)
 
 target_link_libraries(syxg50-jni
     madaha_core
