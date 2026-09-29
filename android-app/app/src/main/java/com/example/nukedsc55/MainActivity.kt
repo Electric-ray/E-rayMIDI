@@ -43,7 +43,8 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var rgEngine:     RadioGroup
     private lateinit var rbEngineSoundfont: RadioButton
     private lateinit var rbEngineMunt: RadioButton
-    private lateinit var rbEngineSyxg50: RadioButton
+    private lateinit var rbEngineGearmulator: RadioButton
+    private lateinit var btnGearmulatorModel: Button
     private lateinit var layoutSoundFontPicker: LinearLayout
     private lateinit var tvSoundFontName: TextView
     private lateinit var btnPickSoundFont: Button
@@ -59,18 +60,20 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var llMuntPanel: LinearLayout
     private lateinit var muntLcdView: MuntLcdView
     private lateinit var llSoundfontPanel: LinearLayout
-    private lateinit var llSyxg50Panel: LinearLayout
+    private lateinit var llGearmulatorPanel: LinearLayout
+    private lateinit var llGearmulatorContainer: LinearLayout
+    private lateinit var gearmulatorLcdView: MuntLcdView
     private lateinit var muntLeds: Array<android.view.View?>
     private lateinit var muntNames: Array<TextView?>
     private lateinit var sfLeds: Array<android.view.View?>
     private lateinit var sfNames: Array<TextView?>
-    private lateinit var syxgLeds: Array<android.view.View?>
-    private lateinit var syxgNames: Array<TextView?>
+    private lateinit var gearLeds: Array<android.view.View?>
+    private lateinit var gearNames: Array<TextView?>
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
     private lateinit var muntEngine: MuntEngine
-    private lateinit var syxg50Engine: SYXG50Engine
+    private lateinit var gearmulatorEngine: GearmulatorEngine
 
     // ── USB MIDI 주변장치(peripheral) 실제 연결 ──────────────────────
     // (munt-android 참고: UsbMidiDeviceService를 매니페스트에 등록해놓는 것만으로는
@@ -201,7 +204,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
 
     // 현재 연결을 시작한 엔진 (셋 중 하나만 동시에 돌릴 수 있음)
-    private enum class EngineType { SC55, SOUNDFONT, MUNT, SYXG50 }
+    private enum class EngineType { SC55, SOUNDFONT, MUNT, GEARMULATOR }
     private var activeEngineType: EngineType? = null
 
     // 기기초기화 버튼이 지금 어느 엔진에 resetEngine()을 호출해야 하는지 공통적으로 찾기 위함
@@ -209,7 +212,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         EngineType.SC55 -> sc55Engine
         EngineType.SOUNDFONT -> sfEngine
         EngineType.MUNT -> muntEngine
-        EngineType.SYXG50 -> syxg50Engine
+        EngineType.GEARMULATOR -> gearmulatorEngine
         null -> null
     }
 
@@ -275,7 +278,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                     muntLcdView.setText(muntEngine.getLcdText())
                 }
                 EngineType.SOUNDFONT -> if (sfEngine.engineRunning) updateLedPanel(sfLeds, sfNames, sfEngine.getPartInfo(), 9)
-                EngineType.SYXG50 -> if (syxg50Engine.engineRunning) updateLedPanel(syxgLeds, syxgNames, syxg50Engine.getPartInfo(), 9)
+                EngineType.GEARMULATOR -> if (gearmulatorEngine.engineRunning) {
+                    updateLedPanel(gearLeds, gearNames, gearmulatorEngine.getPartInfo(), null)
+                    // 문자 LCD가 있는 기종(MT-32/CM-32L류)만 실제 텍스트를 보여주고,
+                    // 그래픽 LCD 기종(SC-55 등)은 LCD를 접어서 LED 패널만 크게 쓴다.
+                    val hasLcd = gearmulatorEngine.hasTextDisplay()
+                    gearmulatorLcdView.visibility = if (hasLcd) android.view.View.VISIBLE else android.view.View.GONE
+                    if (hasLcd) gearmulatorLcdView.setText(gearmulatorEngine.getLcdText())
+                }
                 else -> {}
             }
             if (instrumentPanelRunning) uiHandler.postDelayed(this, INSTRUMENT_PANEL_INTERVAL_MS)
@@ -365,14 +375,15 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         sfEngine.onStatus = { msg -> status(msg) }
         muntEngine = MuntEngine(this)
         muntEngine.onStatus = { msg -> status(msg) }
-        syxg50Engine = SYXG50Engine(this)
-        syxg50Engine.onStatus = { msg -> status(msg) }
+        gearmulatorEngine = GearmulatorEngine(this)
+        gearmulatorEngine.onStatus = { msg -> status(msg) }
 
         rgConnection = findViewById(R.id.rgConnection)
         rgEngine     = findViewById(R.id.rgEngine)
         rbEngineSoundfont = findViewById(R.id.rbEngineSoundfont)
         rbEngineMunt = findViewById(R.id.rbEngineMunt)
-        rbEngineSyxg50 = findViewById(R.id.rbEngineSyxg50)
+        rbEngineGearmulator = findViewById(R.id.rbEngineGearmulator)
+        btnGearmulatorModel = findViewById(R.id.btnGearmulatorModel)
         layoutSoundFontPicker = findViewById(R.id.layoutSoundFontPicker)
         tvSoundFontName = findViewById(R.id.tvSoundFontName)
         btnPickSoundFont = findViewById(R.id.btnPickSoundFont)
@@ -388,12 +399,14 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         llMuntPanel = findViewById(R.id.llMuntPanel)
         muntLcdView = findViewById(R.id.muntLcdView)
         llSoundfontPanel = findViewById(R.id.llSoundfontPanel)
-        llSyxg50Panel = findViewById(R.id.llSyxg50Panel)
+        llGearmulatorPanel = findViewById(R.id.llGearmulatorPanel)
+        llGearmulatorContainer = findViewById(R.id.llGearmulatorContainer)
+        gearmulatorLcdView = findViewById(R.id.gearmulatorLcdView)
         val muntLabels = (2..9).map { "CH$it" } + "CH10"
         val ch16Labels = (1..16).map { "CH$it" }
         buildLedPanelViews(llMuntPanel, muntLabels).let { (l, n) -> muntLeds = l; muntNames = n }
         buildLedPanelViews(llSoundfontPanel, ch16Labels).let { (l, n) -> sfLeds = l; sfNames = n }
-        buildLedPanelViews(llSyxg50Panel, ch16Labels).let { (l, n) -> syxgLeds = l; syxgNames = n }
+        buildLedPanelViews(llGearmulatorPanel, ch16Labels).let { (l, n) -> gearLeds = l; gearNames = n }
         // FIX (깜빡임): nativeGetLcdFrame()이 JNI AndroidBitmap_lockPixels/unlockPixels로
         // 비트맵 픽셀을 직접 쓰는데, 이런 native 측 픽셀 변경은 HWUI가
         // 텍스처 재업로드 여부를 판단하는 generation 카운터를 거치지 않아,
@@ -429,6 +442,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             }
         }
         btnRomHelp.setOnClickListener { showRomHelp() }
+        btnGearmulatorModel.setOnClickListener { showGearmulatorModelPicker() }
 
         onEngineSelectionChanged()
         checkAndRequestStoragePermission()
@@ -441,7 +455,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // 화면 갱신(LCD 또는 악기패널)만 다시 켜준다.
         when (activeEngineType) {
             EngineType.SC55 -> startLcdUpdates()
-            EngineType.MUNT, EngineType.SOUNDFONT, EngineType.SYXG50 -> startInstrumentPanel()
+            EngineType.MUNT, EngineType.SOUNDFONT, EngineType.GEARMULATOR -> startInstrumentPanel()
             null -> {}
         }
     }
@@ -460,18 +474,52 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun onEngineSelectionChanged() {
         val isSoundFont = rbEngineSoundfont.isChecked
         val isMunt = rbEngineMunt.isChecked
-        val isSyxg50 = rbEngineSyxg50.isChecked
+        val isGearmulator = rbEngineGearmulator.isChecked
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        // LCD는 SC-55 전용 (munt/SoundFont/S-YXG50는 실제 LCD 컨트롤러 에뮬레이션이 없음)
-        lcdFrame.visibility = if (!isSoundFont && !isMunt && !isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
-        // 악기명 패널은 세 엔진 다 같은 LED 패널 스타일(엔진당 하나씩)
+        // LCD는 SC-55 전용 (munt/SoundFont/88emu는 실제 LCD 컨트롤러 에뮬레이션이 없음)
+        lcdFrame.visibility = if (!isSoundFont && !isMunt && !isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
+        // 악기명 패널은 같은 LED 패널 스타일(엔진당 하나씩)
         llMuntContainer.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
         llSoundfontPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        llSyxg50Panel.visibility = if (isSyxg50) android.view.View.VISIBLE else android.view.View.GONE
-        // ROM 상태 표시는 ROM 파일이 필요한 SC-55/munt/S-YXG50에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
+        llGearmulatorContainer.visibility = if (isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
+        btnGearmulatorModel.visibility = if (isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
+        if (isGearmulator) refreshGearmulatorModelButton()
+        // ROM 상태 표시는 ROM 파일이 필요한 엔진에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()
         else updateRomStatus()
+    }
+
+    // ── Gearmulator 기종 선택 ────────────────────────────────────────────
+    private fun refreshGearmulatorModelButton() {
+        btnGearmulatorModel.text = "🎹 기종: ${gearmulatorEngine.currentModel.label} ▾"
+        btnGearmulatorModel.isEnabled = !gearmulatorEngine.engineRunning
+    }
+
+    private fun showGearmulatorModelPicker() {
+        if (gearmulatorEngine.engineRunning) {
+            status("⚠️ 기종을 바꾸려면 먼저 연결을 끊어주세요")
+            return
+        }
+        val models = GearmulatorEngine.Model.values()
+        // ROM이 있는지 미리 확인해서 항목에 표시한다 (88lib의 내용 기반 판정,
+        // GearmulatorEngine.isModelAvailable 참고).
+        val items = models.map { m ->
+            val mark = if (gearmulatorEngine.isModelAvailable(m)) "✅" else "⚠️"
+            "$mark ${m.label}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Gearmulator 기종 선택")
+            .setItems(items) { _, which ->
+                val picked = models[which]
+                if (gearmulatorEngine.selectModel(picked)) {
+                    refreshGearmulatorModelButton()
+                    updateRomStatus()
+                    status("기종 선택: ${picked.label}")
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     // ── 사운드폰트 선택 ──────────────────────────────────────────────────
@@ -639,14 +687,22 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             tvRomStatus.text = "파일 접근 권한 없음"
             return
         }
+        if (rbEngineGearmulator.isChecked) {
+            // 88lib는 파일명이 아니라 내용으로 ROM을 식별하므로 다른 엔진과
+            // 체크 방식이 다르다 (GearmulatorEngine.isModelAvailable 참고).
+            val model = gearmulatorEngine.currentModel
+            tvRomStatus.text = if (gearmulatorEngine.isModelAvailable(model))
+                "✅ ${model.label} ROM 확인됨\n${gearmulatorEngine.ROM_DIR}"
+            else
+                "⚠️ ${model.label} ROM 없음\n${gearmulatorEngine.ROM_DIR}"
+            return
+        }
         val romDirPath = when {
             rbEngineMunt.isChecked -> muntEngine.ROM_DIR
-            rbEngineSyxg50.isChecked -> syxg50Engine.ROM_DIR
             else -> sc55Engine.ROM_DIR
         }
         val needed = when {
             rbEngineMunt.isChecked -> muntEngine.getRomFileList()
-            rbEngineSyxg50.isChecked -> syxg50Engine.getRomFileList()
             else -> sc55Engine.getRomFileList()
         }
         val romDir = File(romDirPath)
@@ -662,7 +718,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun showRomHelp() {
         val helpText = when {
             rbEngineMunt.isChecked -> muntEngine.getRomHelpText()
-            rbEngineSyxg50.isChecked -> syxg50Engine.getRomHelpText()
+            rbEngineGearmulator.isChecked -> gearmulatorEngine.getRomHelpText()
             else -> sc55Engine.getRomHelpText()
         }
         AlertDialog.Builder(this)
@@ -676,7 +732,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private fun onConnectClicked() {
         val useSoundFont = rbEngineSoundfont.isChecked
         val useMunt = rbEngineMunt.isChecked
-        val useSyxg50 = rbEngineSyxg50.isChecked
+        val useGearmulator = rbEngineGearmulator.isChecked
         val useRtp = findViewById<RadioButton>(R.id.rbConnRtp).isChecked
         val useUsbMidiDevice = findViewById<RadioButton>(R.id.rbConnUsbMidi).isChecked
 
@@ -716,11 +772,12 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             activeEngineType = EngineType.MUNT
             if (!useUsbMidiDevice) EngineRegistry.active = muntEngine
             startInstrumentPanel()
-        } else if (useSyxg50) {
-            if (!syxg50Engine.initEngine()) return
-            if (!startInputPath(syxg50Engine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
-            activeEngineType = EngineType.SYXG50
-            if (!useUsbMidiDevice) EngineRegistry.active = syxg50Engine
+        } else if (useGearmulator) {
+            if (!gearmulatorEngine.initEngine(gearmulatorEngine.currentModel)) return
+            if (!startInputPath(gearmulatorEngine)) status("⚠️ USB 연결 대기 중 (권한 확인)")
+            activeEngineType = EngineType.GEARMULATOR
+            if (!useUsbMidiDevice) EngineRegistry.active = gearmulatorEngine
+            refreshGearmulatorModelButton()
             startInstrumentPanel()
         } else {
             if (!sc55Engine.initEngine()) return
@@ -748,7 +805,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             EngineType.SC55 -> { sc55Engine.allNotesOff(); sc55Engine.stop() }
             EngineType.SOUNDFONT -> { sfEngine.allNotesOff(); sfEngine.stop() }
             EngineType.MUNT -> { muntEngine.allNotesOff(); muntEngine.stop() }
-            EngineType.SYXG50 -> { syxg50Engine.allNotesOff(); syxg50Engine.stop() }
+            EngineType.GEARMULATOR -> { gearmulatorEngine.allNotesOff(); gearmulatorEngine.stop(); refreshGearmulatorModelButton() }
             null -> {}
         }
         activeEngineType = null

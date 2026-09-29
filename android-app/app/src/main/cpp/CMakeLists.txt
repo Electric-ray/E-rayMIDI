@@ -227,85 +227,34 @@ target_link_libraries(munt-jni
 )
 
 # ---------------------------------------------------------------------------
-# madaha(Rust) — S-YXG50 신시사이저 코어 + JNI 공유 라이브러리
-# nuked-sc55-jni / soundfont-jni / munt-jni와 완전히 독립적인 네 번째 .so.
-#
-# madaha_core는 CMake가 아니라 cargo-ndk로 빌드되는 Rust staticlib이다.
-# ANDROID_ABI(CMake가 AGP로부터 자동으로 받는 변수, 예: "arm64-v8a")를
-# cargo-ndk가 그대로 이해하는 타겟 이름이라 별도 매핑이 필요 없다.
-#
-# 사전 준비 (로컬 1회):
-#   rustup target add \
-#       aarch64-linux-android armv7-linux-androideabi \
-#       x86_64-linux-android i686-linux-android
-#   cargo install cargo-ndk
-#   (edition 2024는 rustc 1.85+ stable에 정식 지원 — nightly 불필요, 확인됨)
-#   LLVM 설치(winget install LLVM.LLVM) — opl3-rs가 bindgen으로 libclang 필요
+# Gearmulator 88emu — Roland Sound Canvas / MT-32 계열 통합 엔진 + JNI 공유 라이브러리
+# 88emu_88emu_통합_개발계획서 Phase 4. dsp56300/gearmulator 저장소에서 88lib
+# 구동에 필요한 최소 서브셋만 vendoring했다(gearmulator/source/ 아래, upstream과
+# 동일한 상대 경로 구조 유지 — 나중에 다시 복사해오기 쉽게).
+# nuked-sc55-jni / soundfont-jni / munt-jni / syxg50-jni와 완전히 독립적인
+# 다섯 번째 .so — 심볼 충돌 없이 나란히 빌드/링크된다.
 # ---------------------------------------------------------------------------
-set(MADAHA_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/madaha)
-set(MADAHA_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/madaha-target)
+set(GEARMULATOR_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/gearmulator)
 
-# cargo-ndk가 만드는 스테이징 경로는 <target-dir>/<rust-triple>/release/*.a 이다.
-# ANDROID_ABI → rust triple 매핑 (BYPRODUCTS/IMPORTED_LOCATION 지정용).
-if(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(MADAHA_RUST_TRIPLE "aarch64-linux-android")
-elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-    set(MADAHA_RUST_TRIPLE "armv7-linux-androideabi")
-elseif(ANDROID_ABI STREQUAL "x86_64")
-    set(MADAHA_RUST_TRIPLE "x86_64-linux-android")
-elseif(ANDROID_ABI STREQUAL "x86")
-    set(MADAHA_RUST_TRIPLE "i686-linux-android")
-else()
-    message(FATAL_ERROR "madaha_core: unsupported ANDROID_ABI ${ANDROID_ABI}")
-endif()
-
-set(MADAHA_CORE_LIB ${MADAHA_TARGET_DIR}/${MADAHA_RUST_TRIPLE}/release/libmadaha_core.a)
-
-# BYPRODUCTS가 핵심: add_custom_target 자체는 OUTPUT이 없는 phony 타겟이라,
-# 이게 없으면 Ninja는 이 커맨드가 libmadaha_core.a를 만든다는 걸 전혀 몰라서
-# "no known rule to make it"으로 그래프 구성 단계에서부터 실패한다.
-# BYPRODUCTS로 알려주면 (1) ninja가 이 파일에 대한 생성 규칙으로 인식하고,
-# (2) 그러면서도 ALL 타겟이라 매 빌드마다 커맨드 자체는 계속 실행됨
-# (오래 안 걸림 — cargo 자체가 증분 빌드라 소스 변경 없으면 즉시 끝난다).
-add_custom_target(
-    build_madaha_core ALL
-    COMMAND ${CMAKE_COMMAND} -E env
-        ANDROID_NDK_HOME=${CMAKE_ANDROID_NDK}
-        "LIBCLANG_PATH=C:/Program Files/LLVM/bin"
-        cargo ndk
-            -t ${ANDROID_ABI}
-            --platform 24
-            build --target-dir ${MADAHA_TARGET_DIR} --release --no-default-features --lib
-    BYPRODUCTS ${MADAHA_CORE_LIB}
-    WORKING_DIRECTORY ${MADAHA_ROOT}
-    COMMENT "cargo-ndk: madaha_core staticlib (${ANDROID_ABI})"
-    VERBATIM
-)
-
-add_library(madaha_core STATIC IMPORTED)
-set_target_properties(madaha_core PROPERTIES IMPORTED_LOCATION ${MADAHA_CORE_LIB})
-add_dependencies(madaha_core build_madaha_core)
+add_subdirectory(${GEARMULATOR_ROOT}/source ${CMAKE_CURRENT_BINARY_DIR}/gearmulator-min)
 
 add_library(
-    syxg50-jni
+    gearmulator-jni
     SHARED
-    SYXG50Bridge.cpp
+    GearmulatorBridge.cpp
+    ${GEARMULATOR_ROOT}/GearmulatorEngine.cpp
 )
 
-# NOTE: IMPORTED 라이브러리에 건 순서 의존성만으로는 부족할 때가 있어,
-# 실제 빌드 타겟인 syxg50-jni에도 직접 건다 (AGP가 명시적 타겟 목록으로
-# ninja를 호출해도 build_madaha_core가 먼저 실행됨을 보장).
-add_dependencies(syxg50-jni build_madaha_core)
+target_include_directories(gearmulator-jni PRIVATE
+    ${GEARMULATOR_ROOT}
+    ${GEARMULATOR_ROOT}/source
+)
 
-# 실제 렌더링은 madaha_core(Rust, 이미 Cargo release 프로파일로 opt-level=3)가
-# 하지만, 이 브리지 자체(링버퍼 push/pop 루프, AAudio 콜백)도 다른 세 엔진과
-# 일관되게 최적화한다 (코드 최적화 리뷰로 확인 — 여기만 빠져 있었음).
-target_compile_options(syxg50-jni PRIVATE -O3 -fomit-frame-pointer)
+target_compile_options(gearmulator-jni PRIVATE -O3 -fomit-frame-pointer -flto=thin)
+target_link_options(gearmulator-jni PRIVATE -flto=thin)
 
-target_link_libraries(syxg50-jni
-    madaha_core
+target_link_libraries(gearmulator-jni
+    88lib
     ${log-lib}
     ${aaudio-lib}
-    # Rust staticlib이 참조하는 libc/libm/pthread/dl은 NDK의 libc/libm에
-    # 이미 포함되어 있어 별도 링크가 필요 없다.
 )

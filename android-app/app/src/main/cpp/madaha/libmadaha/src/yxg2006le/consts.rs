@@ -1,1 +1,0 @@
-pub const HEADER: [char; 8] = ['U', 'T', 'G', ' ', 'V', 'P', 'R', 'M'];

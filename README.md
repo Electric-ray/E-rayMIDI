@@ -1,8 +1,8 @@
 # E-ray MIDI
 
-Roland SC-55 / MT-32 / SoundFont(SF2) / **S-YXG50(YAMAHA XG)** 네 가지 재생 엔진과,
-RTP-MIDI(WiFi) / USB 시리얼 / USB MIDI 주변장치(peripheral) 세 가지 연결 방식을
-하나로 통합한 Android MIDI 재생 앱입니다.
+Roland SC-55 / MT-32 / SoundFont(SF2) / **88emu(Roland Sound Canvas·MT-32 계열
+통합 엔진)** 네 가지 재생 엔진과, RTP-MIDI(WiFi) / USB 시리얼 / USB MIDI
+주변장치(peripheral) 세 가지 연결 방식을 하나로 통합한 Android MIDI 재생 앱입니다.
 
 
 
@@ -19,9 +19,18 @@ https://github.com/user-attachments/assets/fb366aac-3d51-4342-96ac-d7def23d242d
 
 원래는 [nukeykt/Nuked-SC55](https://github.com/nukeykt/Nuked-SC55)의 Android 포팅으로
 시작했지만, [munt](https://github.com/munt/munt)(MT-32/CM-32L), FluidSynth(SF2),
-[madaha](https://github.com/madaha-dev/madaha)(S-YXG50) 코어를 함께 통합하면서
-단일 엔진 포팅 프로젝트를 넘어선 4-엔진 레트로 MIDI 모듈이 되었습니다.
+[dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)의 88emu(Roland
+Sound Canvas·MT-32 계열 통합 LLE 엔진) 코어를 함께 통합하면서 단일 엔진 포팅
+프로젝트를 넘어선 4-엔진 레트로 MIDI 모듈이 되었습니다.
 
+> **v1.5 패치 노트**: 불안정했던 S-YXG50(madaha) 엔진을 제거하고, 대신 실제
+> Roland 펌웨어를 그대로 구동하는 **88emu** 엔진을 새로 얹었습니다 — SC-55/SC-88/
+> SC-88Pro/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 하나의 엔진에서
+> 선택할 수 있습니다. 오디오 파이프라인을 다른 세 엔진과 동일한 구조(전용 렌더
+> 스레드+링버퍼)로 통일했고, Debug 빌드에서 CPU 에뮬레이션 코어가 최적화 없이
+> 빌드되던 문제도 고쳤습니다. 자세한 변경 내역은
+> [아래 "v1.5에서 달라진 점"](#v15에서-달라진-점) 참고.
+>
 > **v1.4 패치 노트**: USB MIDI 주변장치 안정성 개선, SC-55 LCD 화면 깨짐(프레임버퍼
 > data race) 수정, MT-32 모드에 실제 LCD 그래픽 디스플레이 추가, 앱 아이콘 교체.
 > 자세한 변경 내역은 [아래 "v1.4에서 달라진 점"](#v14에서-달라진-점) 참고.
@@ -48,9 +57,9 @@ DOS PC/호스트 ───┼─ USB 시리얼 (rs232 to USB 널모뎀케이블)
                                 │
         ┌──────────────┬───────┴───────┬──────────────┐
         ▼              ▼               ▼              ▼
-   SC-55 엔진      MT-32 엔진     SoundFont 엔진   S-YXG50 엔진
- (Nuked-SC55 코어)  (munt 코어)   (FluidSynth 2.6)  (madaha 코어)
-   ROM 파일 필요    ROM 파일 필요   .sf2 파일 필요    ROM 파일 필요
+   SC-55 엔진      MT-32 엔진     SoundFont 엔진     88emu 엔진
+ (Nuked-SC55 코어)  (munt 코어)   (FluidSynth 2.6)  (dsp56300/gearmulator)
+   ROM 파일 필요    ROM 파일 필요   .sf2 파일 필요   ROM 파일 필요(11개 기종 선택)
         │              │               │              │
         └──────────────┴───────┬───────┴──────────────┘
                                 ▼
@@ -70,17 +79,15 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
 | **타겟 Android 버전** | Android 15 (API 36) | `targetSdk = 36` |
 | **CPU 아키텍처** | **arm64-v8a (64비트 ARM) 전용** | `abiFilters`가 arm64-v8a만 포함 — 32비트 전용 기기(armeabi-v7a만 지원하는 구형 기기)나 x86/x86_64 기기(대부분의 에뮬레이터 포함)에서는 **네이티브 라이브러리가 로드되지 않아 실행되지 않습니다** |
 | **오디오 API** | AAudio (`AAUDIO_PERFORMANCE_MODE_LOW_LATENCY`) | Android 8.0(API 26)부터 제공되는 저지연 오디오 API. API 29 이상에서 이미 충분히 성숙한 상태로 동작 |
-| **RAM** | 최소 3GB 권장 | S-YXG50 엔진 내부에 8MB 크기의 사전계산 피치 테이블이 있고, FluidSynth·SoundFont 샘플 데이터도 메모리에 올라감 — 저사양 기기에서는 여유 있게 |
+| **RAM** | 최소 3GB 권장 | 88emu는 선택한 기종의 ROM(웨이브 ROM 포함, 최대 수 MB)을 메모리에 올리고, FluidSynth·SoundFont 샘플 데이터도 메모리에 올라감 — 저사양 기기에서는 여유 있게 |
 | **저장공간** | ROM/SF2 파일 크기에 따라 다름 | 앱 자체는 가볍지만(APK ~수십MB), SF2 사운드폰트는 파일에 따라 수백MB까지도 가능 |
-| **테스트 기기** | LG Velvet (LG-G910N), Android 10 (API 29) | 전체 개발/디버깅이 이 기기에서 이뤄짐. 다른 기기에서도 동작해야 하지만 폭넓게 테스트되지는 않음 |
+| **테스트 기기** | LG Velvet (LG-G910N, Android 10), Galaxy A52s (Android 13) | 전체 개발/디버깅이 이 두 기기에서 이뤄짐. 다른 기기에서도 동작해야 하지만 폭넓게 테스트되지는 않음 |
 
 ### 왜 arm64-v8a 전용인가?
-- S-YXG50 엔진(Rust)과 FluidSynth 프리빌트 바이너리는 여러 ABI로 빌드/이식 가능하지만,
+- FluidSynth 프리빌트 바이너리와 88emu 코어는 다른 ABI로도 빌드 가능하지만,
   현재 `build.gradle.kts`가 **arm64-v8a만** 타겟하도록 고정되어 있습니다(테스트 기기가
-  arm64 전용이라 다른 ABI는 실기기 검증을 못 했기 때문). armeabi-v7a/x86/x86_64를
-  지원하려면 `abiFilters`를 넓히고 각 ABI별로 실제 빌드가 되는지 검증이 필요합니다
-  (S-YXG50 쪽은 `cargo ndk`로 4개 ABI 모두 크로스컴파일까지는 확인됐지만, 실기기
-  구동 검증은 arm64-v8a에서만 이뤄졌습니다).
+  전부 arm64 전용이라 다른 ABI는 실기기 검증을 못 했기 때문). armeabi-v7a/x86/x86_64를
+  지원하려면 `abiFilters`를 넓히고 각 ABI별로 실제 빌드가 되는지 검증이 필요합니다.
 
 ### 왜 API 29 이상인가?
 - AAudio의 `AAUDIO_PERFORMANCE_MODE_LOW_LATENCY`, `setBufferSizeInFrames` 등 이 앱이
@@ -292,6 +299,86 @@ getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 �
 
 ---
 
+## v1.5에서 달라진 점
+
+### 1. S-YXG50(madaha) 엔진 제거
+v1.3에서 추가한 S-YXG50 엔진을 제거했습니다. madaha 코어 자체의 버그(드럼 노트가
+의도한 악기와 다르게 재생되는 문제 등, 위 "v1.3에서 달라진 점 - 2" 참고)가
+계속 남아있었는데, 업스트림이 이 부분을 개선할 기미가 없어 더 기다리는 대신
+제거하기로 결정했습니다. `SYXG50Engine.kt`, `SYXG50Bridge.cpp`,
+`app/src/main/cpp/madaha/`(Rust 소스 전체)와 CMakeLists.txt의 `cargo-ndk` 빌드
+스텝을 전부 삭제했습니다 — Rust 툴체인 없이도 빌드되는 상태로 되돌아갔습니다.
+
+### 2. 새 엔진 추가 — 88emu (Roland Sound Canvas·MT-32 계열 통합 엔진)
+[dsp56300/gearmulator](https://github.com/dsp56300/gearmulator) 저장소의 88emu
+(`88lib`)를 새 엔진으로 얹었습니다. Nuked-SC55/munt와 같은 철학의 **LLE
+(Low-Level Emulation)** 코어로, 실제 Roland 하드웨어의 MCU(H8/500, SH-2, MCS-96
+계열)와 커스텀 음원 칩을 사이클 단위로 에뮬레이션해서 원본 ROM을 그대로
+구동합니다.
+
+- 한 엔진에서 **11개 기종**을 선택할 수 있습니다: SC-55/SC-55mk2, SC-88, SC-88Pro,
+  SC-8820, SC-8850, MT-32(구형/신형 기판), CM-32L, CM-32P, CM-64. "88emu" 라디오
+  버튼을 선택하면 나타나는 "🎹 기종: ..." 버튼에서 팝업으로 고를 수 있고, 각
+  항목 옆에 해당 ROM이 실제로 인식됐는지(✅/⚠️) 실시간으로 표시됩니다.
+- 88lib는 ROM을 파일명이 아니라 **내용(해시)** 으로 식별합니다 — 다른 세 엔진처럼
+  정확한 파일명을 요구하지 않고, `rom_gearmulator/` 폴더(하위 폴더 포함)에 있는
+  파일을 훑어서 자동으로 알맞은 세트를 찾아 씁니다. 기존에 SC-55용으로 준비해둔
+  ROM 5개를 그대로 복사해 넣으면 SC-55/SC-55mk2 모두 바로 인식됩니다.
+- upstream 저장소 전체(freetype/lunasvg/RmlUi/JUCE GUI/다른 신스 포함, 수백MB)를
+  그대로 벤더링하지 않고, 88lib 구동에 실제로 필요한 최소 서브셋(88lib 본체,
+  h8500/sh2/mcs96 CPU 코어, custom_chips JIT, asmjit, ~14MB)만 골라
+  `app/src/main/cpp/gearmulator/source/`에 upstream과 동일한 상대 경로 구조로
+  벤더링했습니다 — 나중에 upstream이 갱신되면 같은 서브셋만 다시 복사해오면
+  됩니다.
+
+### 3. 오디오 파이프라인을 88emu에도 동일한 구조로 통일 — 단, 스레드 하나 제약 있음
+다른 세 엔진과 똑같이 "전용 렌더 스레드 → 락프리 링버퍼 → AAudio 콜백은 pop만"
+구조로 만들었습니다. 다만 한 가지 차이가 있습니다: 88lib의 `emu88_context`는
+**스레드 세이프하지 않습니다**(공식 API 문서: "use it from one thread at a
+time"). FluidSynth(SoundFont)처럼 MIDI 처리 스레드와 렌더 스레드를 완전히
+분리할 수 없어서, SC55Bridge의 `mcuLoop`와 같은 방식으로 "MIDI 드레인 + 렌더"를
+같은 전용 스레드 안에서 순서대로 처리하도록 만들었습니다. AAudio 콜백과는
+여전히 링버퍼로 완전히 분리되어 있어서, 렌더가 순간적으로 느려져도(리버브 계산
+등) AAudio 콜백 데드라인은 영향받지 않습니다.
+
+### 4. Debug 빌드에서 CPU 에뮬레이션 코어가 무최적화로 빌드되던 문제 수정
+`nuked-sc55-jni`는 MCU 에뮬레이션 소스를 브리지와 같은 CMake 타겟에 넣고
+`-O3`를 강제하지만, 88lib는 여러 개의 독립된 CMake 타겟(h8500/sh2/mcs96/
+custom_chips/hardwareLib/...)으로 나뉘어 있어서 그 방식을 그대로 쓸 수
+없었습니다. 처음엔 브리지 파일에만 `-O3`를 줬는데, 사이클 단위로 명령어를
+해석하는 CPU 인터프리터 자체가 Debug 빌드 기본값(`-O0`)으로 컴파일되고 있어서
+실기(Galaxy A52s)에서 뚜렷한 버벅임으로 나타났습니다. `gearmulator/source/
+CMakeLists.txt` 최상단에서 이 디렉터리 스코프 전체의 컴파일 플래그에
+`-O3 -DNDEBUG`를 강제로 얹어서, 88lib가 필요로 하는 모든 하위 라이브러리가
+Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하나로 체감 성능이
+크게 개선됐습니다.
+
+### 5. 기종에 따라 실제 LCD 텍스트 자동 표시
+88lib의 공개 C API는 Nuked-SC55처럼 LCD 픽셀 프레임버퍼를 통째로 노출하지는
+않지만, 문자 LCD(HD44780 컨트롤러)를 쓰는 기종에서는 실제 디스플레이 텍스트를
+제공합니다. 확인해보니 SC-55/SC-88/SC-88Pro도 MT-32/CM-32L과 같은 HD44780
+계열이라, 텍스트가 정상적으로 나옵니다(SC-8850만 진짜 그래픽 LCD라 API가
+텍스트를 주지 않습니다). 그래서:
+- 문자 LCD가 있는 기종(MT-32/CM-32L류, SC-55/SC-88/SC-88Pro)은 기존
+  `MuntLcdView`(도트매트릭스 스타일 렌더링)로 실제 기기 텍스트를 보여줍니다.
+- SC-8850처럼 그래픽 전용 LCD 기종은 LCD 영역이 자동으로 접히고, 채널별 LED
+  패널(활성 상태 + Program Change 번호)만 크게 표시됩니다.
+- 이 전환은 자동입니다 — 어떤 기종을 고르든 실행 중에 판별해서 알맞은 화면으로
+  바뀝니다.
+
+### 6. UI 정리
+- MODE 패널의 라디오버튼 텍스트를 "Gearmulator"에서 짧은 **"88emu"** 로 변경
+  (줄바꿈 방지).
+- S-YXG50 라디오버튼과 관련 패널을 완전히 제거.
+
+> ⚠️ **라이선스 주의**: 88lib(dsp56300/gearmulator)는 **GPL-3.0**입니다. 다른
+> 세 엔진의 라이선스(MIT/MAME/LGPL-2.1)와 다르게, 이 코드가 포함된 결과물을
+> 배포하면 GPLv3 조건(소스 공개 등)이 적용될 수 있습니다. 개인 사용에는 문제가
+> 없지만, 배포 계획이 있다면 조건을 다시 확인하세요. 아래 "라이선스/크레딧"
+> 참고.
+
+---
+
 ## 주요 기능
 
 ### 연결 방식 (셋 중 선택)
@@ -309,8 +396,10 @@ getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 �
   스타일로 재현(파트별 LED + 패치명 + LCD 디스플레이). GS 전용으로 만들어진 곡을
   재생할 때 발생하는 무음 문제에 대한 자동 대응 포함 (아래 "알려진 이슈와 대응" 참고).
 - **SoundFont**: FluidSynth 2.6.0 기반 `.sf2` 재생. 채널별 프리셋명 실시간 표시.
-- **S-YXG50**: madaha(Rust) 기반 YAMAHA XG 소프트웨어 신시사이저. 채널별 뱅크/
-  프로그램 번호 실시간 표시(SF2와 달리 ROM에 사람이 읽는 악기명 테이블이 없음).
+- **88emu**: dsp56300/gearmulator 기반 Roland 통합 LLE 엔진. SC-55/SC-88/
+  SC-88Pro/SC-8820/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 팝업에서
+  선택. HD44780 문자 LCD 기종은 실제 기기 텍스트를, 그래픽 LCD 전용 기종(SC-8850)은
+  채널별 LED 패널을 자동으로 보여줌.
 
 ### 안정성 보강 (실사용 중 발견된 버그 수정)
 - RTP-MIDI SysEx가 여러 패킷에 걸쳐 전송될 때 경계 처리 오류로 LCD 애니메이션이
@@ -330,6 +419,8 @@ getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 �
   race) 수정
 - **(v1.4)** USB MIDI기기 모드 재협상 시 죽은 포트를 붙잡던 문제 완화, 빠른 곡에서
   USB MIDI만 끊기던 문제 수정
+- **(v1.5)** 88emu Debug 빌드에서 CPU 에뮬레이션 코어가 무최적화(`-O0`)로 빌드되어
+  버벅이던 문제 수정 (위 "v1.5에서 달라진 점 - 4" 참고)
 
 ---
 
@@ -350,10 +441,11 @@ getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 �
 - SoundFont 모드는 GM 표준까지만 지원하며 Roland GS 전용 확장은 표현하지 못합니다.
 - SC-55 LCD 렌더링에 미세한 깜빡임이 있을 수 있습니다(화면이 깨지거나 겹쳐 보이는
   더 심각한 증상은 v1.4에서 data race를 고쳐서 해결됨 — 위 "v1.4에서 달라진 점" 참고).
-- **(v1.3) S-YXG50 모드에서 일부 곡의 드럼 노트가 여전히 의도한 악기와 다르게(또는
-  무음으로) 재생될 수 있습니다.** madaha 자체의 버그 여러 개를 찾아 고쳤지만
-  (위 "v1.3에서 달라진 점 - 2" 참고) 완전히 해결되지는 않았고, madaha 코어의 더
-  깊은 부분에 원인이 있는 것으로 추정되어 업스트림 개선을 기다리며 보류 중입니다.
+- **88emu 모드에서 SC-8850을 고르면 LCD 영역이 항상 접혀 있습니다.** SC-8850은
+  진짜 그래픽 LCD(문자가 아닌 픽셀 프레임버퍼)를 쓰는데, 88lib의 공개 C API가
+  텍스트 디스플레이(HD44780류)만 노출하고 그래픽 프레임버퍼는 제공하지 않아서,
+  현재 API로는 Nuked-SC55처럼 픽셀 단위로 재현할 방법이 없습니다. 채널별 LED
+  패널로 대신 표시됩니다.
 - **USB MIDI기기 모드에서, 아주 드물게 연결된 상태로 표시되는데도 소리가 안 나올
   수 있습니다.** 안드로이드 기기의 USB MIDI 주변장치(peripheral) 게이트웨이가
   스스로 재협상되면서 생기는 것으로 추정되는 플랫폼 레벨 이슈입니다(리눅스/MiSTer
@@ -379,7 +471,7 @@ getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 �
 | SC-55 | `/sdcard/Download/rom_sc55/` |
 | MT-32 | `/sdcard/Download/rom_munt/` |
 | SoundFont | `/sdcard/Download/soundfont/` (`.sf2` 파일) |
-| S-YXG50 | `/sdcard/Download/rom_s-yxg50/` (`sxgbin41.tbl`, `sxgwave4.tbl`) |
+| 88emu | `/sdcard/Download/rom_gearmulator/` (파일명 무관 — 내용으로 자동 인식, 하위 폴더도 OK) |
 
 SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내" 버튼에서 확인할 수
 있습니다 (모델별로 다를 수 있음). ROM/사운드폰트 파일은 저작권 보호 대상이라
@@ -396,12 +488,10 @@ SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내"
 - CMake 3.22.1
 - Target SDK 36 (Android 15) / Min SDK 29 (Android 10)
 - C++17 / C++20
-- **(v1.3 추가)** S-YXG50(madaha) 빌드용:
-  - Rust stable 1.85+ (edition 2024 지원 버전 — `rustup`으로 설치, nightly 불필요)
-  - Android 타겟 4종: `rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android`
-  - `cargo install cargo-ndk`
-  - LLVM/libclang (일부 의존 크레이트의 bindgen 빌드용 — `winget install LLVM.LLVM` 등)
-- FluidSynth/madaha 관련 사전 준비물과 빌드 순서는 [BUILDING.md](BUILDING.md)에
+- 88emu(gearmulator) 빌드에 별도 도구는 필요 없습니다 — 필요한 소스가 전부
+  `app/src/main/cpp/gearmulator/source/`에 벤더링되어 있어서 표준 CMake/NDK
+  빌드로 충분합니다.
+- FluidSynth 관련 사전 준비물과 빌드 순서는 [BUILDING.md](BUILDING.md)에
   자세히 정리되어 있습니다.
 
 ---
@@ -416,9 +506,9 @@ android-app/
     │   ├── SC55Engine.kt           # Nuked-SC55 코어 어댑터
     │   ├── MuntEngine.kt           # munt(mt32emu) 코어 어댑터
     │   ├── SoundFontEngine.kt      # FluidSynth 어댑터
-    │   ├── SYXG50Engine.kt         # madaha(S-YXG50) 어댑터
+    │   ├── GearmulatorEngine.kt    # 88emu(dsp56300/gearmulator) 어댑터, 11개 기종 선택
     │   ├── LcdView.kt              # SC-55 그래픽 LCD (네이티브 프레임버퍼 → Bitmap)
-    │   ├── MuntLcdView.kt          # MT-32 그래픽 LCD (텍스트 → 도트매트릭스 렌더링)
+    │   ├── MuntLcdView.kt          # MT-32/88emu 공용 그래픽 LCD (텍스트 → 도트매트릭스 렌더링)
     │   ├── RtpMidiSession.kt       # RTP-MIDI(AppleMIDI) 클라이언트
     │   ├── UsbMidiManager.kt       # USB 시리얼 입력 (usb-serial-for-android)
     │   ├── MidiStreamParser.kt     # Running-status/SysEx MIDI 바이트 파서
@@ -429,11 +519,13 @@ android-app/
         ├── SC55Bridge.cpp          # Nuked-SC55 JNI 브리지
         ├── MuntBridge.cpp          # munt(mt32emu) JNI 브리지
         ├── FluidBridge.cpp         # FluidSynth JNI 브리지
-        ├── SYXG50Bridge.cpp        # madaha(Rust staticlib) JNI 브리지
+        ├── GearmulatorBridge.cpp   # 88emu JNI 브리지 (전용 렌더 스레드 + 링버퍼)
         ├── munt/mt32emu/           # munt 코어 소스 (이식됨)
         ├── nuked-sc55/             # Nuked-SC55 코어 소스
         ├── fluidsynth/             # FluidSynth 공식 Android 프리빌트 (include/ + lib/<abi>/)
-        └── madaha/                 # madaha(S-YXG50) Rust 소스 (벤더링됨, Cargo 프로젝트)
+        └── gearmulator/            # 88emu(dsp56300/gearmulator) 벤더링 소스
+            ├── GearmulatorEngine.h/.cpp   # emu88 C API를 감싸는 C++ 어댑터
+            └── source/             # 88lib 구동 최소 서브셋 (upstream과 동일한 경로 구조)
 ```
 
 ---
@@ -444,16 +536,22 @@ android-app/
 - [Nuked SC-55](https://github.com/nukeykt/Nuked-SC55) 코어: MAME License (비상업적 사용만 가능)
 - [munt](https://github.com/munt/munt) (MT-32/CM-32L) 코어: LGPL-2.1
 - [FluidSynth](https://www.fluidsynth.org/): LGPL-2.1
-- [madaha](https://github.com/madaha-dev/madaha) (S-YXG50) 코어: 원본 저장소의
-  라이선스를 따름 — `app/src/main/cpp/madaha/LICENSE` 참고
+- [dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)의 88emu(`88lib`)
+  코어: **GPL-3.0**
 - [Arduino-AppleMIDI-Library](https://github.com/lathoub/Arduino-AppleMIDI-Library) (ESP32 RTP-MIDI): MIT License
 - [usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android): Apache 2.0
 - ESP32 브리지 펌웨어: [Electric-ray/E-RayDSB](https://github.com/Electric-ray/E-RayDSB)
-- SC-55 / MT-32 ROM: 별도 라이선스 (Roland Corp.) — 미포함
-- S-YXG50 ROM: 별도 라이선스 (YAMAHA Corp.) — 미포함
+- SC-55 / MT-32 / 88emu ROM: 별도 라이선스 (Roland Corp.) — 미포함
 - SF2 사운드폰트: 각 제작자의 라이선스를 따름 — 미포함
 
 > ⚠️ FluidSynth/munt는 LGPL-2.1입니다. 이 앱은 둘 다 **동적 라이브러리(.so)로
 > 링크**하고 있어 LGPL 조건(정적으로 링크한 클로즈드소스 앱에 배포하려면 안 되는
 > 조건)에 저촉되지 않지만, 배포 형태를 바꿀 계획이 있다면 라이선스 조건을 다시
 > 확인하세요.
+>
+> ⚠️ 88emu(dsp56300/gearmulator, `88lib`)는 **GPL-3.0**으로, 위 LGPL 두 개와는
+> 조건이 다릅니다. 이 앱은 88lib를 **정적으로 링크**해서 하나의 `.so`
+> (`libgearmulator-jni.so`)로 빌드합니다 — GPLv3는 이렇게 결합된 결과물을
+> 배포할 경우 전체 결합물에 대해 소스 공개 등 copyleft 조건이 적용될 수 있습니다.
+> 개인적으로 빌드해서 쓰는 데는 문제가 없지만, 앱을 배포(스토어 업로드, APK 공유
+> 등)할 계획이 있다면 GPLv3 조건을 검토해야 합니다 (법률 자문 아님).

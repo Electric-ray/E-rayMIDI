@@ -18,7 +18,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="E-rayMIDI v1.4"
+            android:text="E-rayMIDI v1.5"
             android:textColor="#e0e0ff"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -113,7 +113,7 @@
                     android:textSize="11sp" />
 
                 <RadioButton
-                    android:id="@+id/rbEngineSyxg50"
+                    android:id="@+id/rbEngineGearmulator"
                     android:layout_width="match_parent"
                     android:layout_height="36dp"
                     android:background="@drawable/btn_led_toggle_bg"
@@ -122,7 +122,7 @@
                     android:drawablePadding="6dp"
                     android:gravity="center_vertical"
                     android:paddingStart="8dp"
-                    android:text="S-YXG50"
+                    android:text="88emu"
                     android:textColor="#e0e0ff"
                     android:textSize="11sp" />
             </RadioGroup>
@@ -201,17 +201,33 @@
                         android:visibility="gone" />
                 </ScrollView>
 
-                <ScrollView
+                <LinearLayout
+                    android:id="@+id/llGearmulatorContainer"
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent">
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
-                    <LinearLayout
-                        android:id="@+id/llSyxg50Panel"
+                    <!-- 88lib가 노출하는 실제 문자 LCD 텍스트(MT-32/CM-32L류 전용 —
+                     SC-55/SC-88 등 그래픽 LCD 기종은 API가 텍스트를 안 주므로 빈 화면). -->
+                    <com.example.nukedsc55.MuntLcdView
+                        android:id="@+id/gearmulatorLcdView"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:visibility="gone" />
-                </ScrollView>
+                        android:layout_height="90dp"
+                        android:layout_marginBottom="6dp" />
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <LinearLayout
+                            android:id="@+id/llGearmulatorPanel"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </ScrollView>
+                </LinearLayout>
             </FrameLayout>
 
             <!-- 상태 로그 + ROM 상태: 좌우 배치 (표시 정보량에 비해 세로로 쌓으면 폭이 너무 넓었음) -->
@@ -262,6 +278,24 @@
                             android:text="ROM 확인 중…"
                             android:textColor="#aaaacc"
                             android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btnGearmulatorModel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:layout_gravity="end"
+                            android:layout_marginBottom="4dp"
+                            android:background="@drawable/btn_physical_neutral"
+                            android:minWidth="0dp"
+                            android:minHeight="0dp"
+                            android:paddingStart="10dp"
+                            android:paddingTop="0dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="0dp"
+                            android:text="🎹 기종: SC-55mk2"
+                            android:textColor="#ccccdd"
+                            android:textSize="9sp"
+                            android:visibility="gone" />
 
                         <Button
                             android:id="@+id/btnRomHelp"

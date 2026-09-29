@@ -1,1 +1,0 @@
-/// WinGroove has TPD file with *signed 8 bit depth* and sample rate 22050Hz
