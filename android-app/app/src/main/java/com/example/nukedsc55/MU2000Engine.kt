@@ -49,6 +49,9 @@ class MU2000Engine(val ctx: Context) : IEngine {
     override var onStatus: ((String) -> Unit)? = null
     override var engineRunning = false
 
+    // MIDI 파일 재생 중에는 true (IEngine.bypassWatchdogs 참고) — 유실 없는 입력이라 워치독/재발음 보정을 건너뜀
+    @Volatile override var bypassWatchdogs = false
+
     fun getRomHelpText(): String = buildString {
         appendLine("📂 ROM 폴더: $ROM_DIR/")
         appendLine()
@@ -178,8 +181,10 @@ class MU2000Engine(val ctx: Context) : IEngine {
     // S-MU2000은 바이트 스트림 방식 — SysEx도 별도 분기 없이 그대로 넘긴다.
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        trackSustain(bytes)
-        trackNote(bytes)
+        if (!bypassWatchdogs) {
+            trackSustain(bytes)
+            trackNote(bytes)
+        }
         trackPartInfo(bytes)
         nativeSendMidi(bytes, bytes.size)
     }

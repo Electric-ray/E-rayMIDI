@@ -46,6 +46,9 @@ class SC55Engine(val ctx: Context) : IEngine {
     override var onStatus: ((String) -> Unit)? = null
     override var engineRunning = false
 
+    // MIDI 파일 재생 중에는 true (IEngine.bypassWatchdogs 참고) — 유실 없는 입력이라 워치독/재발음 보정을 건너뜀
+    @Volatile override var bypassWatchdogs = false
+
     // ── 진단용 카운터 (RTP vs USB에서 실제로 몇 개의 MIDI 메시지가 엔진까지
     //    도달하는지 1초마다 로그로 비교하기 위함 — LCD 파라미터 바 애니메이션이
     //    RTP에서만 안 되는 문제의 원인이 RTP 파싱 단계의 메시지 드롭인지
@@ -207,7 +210,7 @@ class SC55Engine(val ctx: Context) : IEngine {
         // 이전 발음을 자동으로 컷하는 동작과 동일). 스트링처럼 같은 음을 자주 재트리거하는
         // 파트에서 잔향이 많이 줄어든다. (완전히 다른 음으로 넘어가면서 Note Off만 유실되는
         // 경우는 이것으로는 못 잡고 여전히 워치독에 의존한다.)
-        run {
+        if (!bypassWatchdogs) run {
             if (bytes.size >= 3) {
                 val st0 = bytes[0].toInt() and 0xFF
                 if (st0 and 0xF0 == 0x90 && (bytes[2].toInt() and 0xFF) > 0) {
@@ -221,8 +224,10 @@ class SC55Engine(val ctx: Context) : IEngine {
                 }
             }
         }
-        trackSustain(bytes)
-        trackNote(bytes)
+        if (!bypassWatchdogs) {
+            trackSustain(bytes)
+            trackNote(bytes)
+        }
         val n = dumpCounter.incrementAndGet()
         if (n <= 60) {
             val hex = bytes.joinToString(" ") { String.format("%02X", it) }

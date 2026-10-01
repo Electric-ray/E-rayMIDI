@@ -79,6 +79,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var muntEngine: MuntEngine
     private lateinit var gearmulatorEngine: GearmulatorEngine
     private lateinit var mu2000Engine: MU2000Engine
+    private lateinit var midiPlayerPanel: MidiPlayerPanel
 
     // ── USB MIDI 주변장치(peripheral) 실제 연결 ──────────────────────
     // (munt-android 참고: UsbMidiDeviceService를 매니페스트에 등록해놓는 것만으로는
@@ -452,9 +453,20 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
                 startUsbMidiPeripheral()
                 status("🔄 USB MIDI 연결 재시작됨")
             }
+            // MIDI 파일 모드에서는 "초기화" = 재생 중인 곡 정지 (엔진 상태는 위에서 이미 정리됨)
+            if (findViewById<RadioButton>(R.id.rbConnMidiFile).isChecked && activeEngineType != null) {
+                midiPlayerPanel.stopSong()
+            }
         }
         btnRomHelp.setOnClickListener { showRomHelp() }
         btnGearmulatorModel.setOnClickListener { showGearmulatorModelPicker() }
+
+        midiPlayerPanel = MidiPlayerPanel(
+            activity = this,
+            prefs = prefs,
+            status = { msg -> status(msg) },
+            canPlay = { EngineRegistry.active != null }
+        )
 
         onEngineSelectionChanged()
         checkAndRequestStoragePermission()
@@ -470,6 +482,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             EngineType.MUNT, EngineType.SOUNDFONT, EngineType.GEARMULATOR, EngineType.MU2000 -> startInstrumentPanel()
             null -> {}
         }
+        midiPlayerPanel.onResume()
     }
 
     override fun onPause() {
@@ -480,6 +493,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // 스레드/AAudio 콜백으로 도는 거라 UI 정지와 무관하게 계속 재생된다.
         stopLcdUpdates()
         stopInstrumentPanel()
+        midiPlayerPanel.onPause()
     }
 
     // ── 재생 엔진 선택 UI 반영 ───────────────────────────────────────────
@@ -758,14 +772,21 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         val useMu2000 = rbEngineMu2000.isChecked
         val useRtp = findViewById<RadioButton>(R.id.rbConnRtp).isChecked
         val useUsbMidiDevice = findViewById<RadioButton>(R.id.rbConnUsbMidi).isChecked
+        val useMidiFile = findViewById<RadioButton>(R.id.rbConnMidiFile).isChecked
 
         // 연결방식에 따라 실제 입력 경로를 열어주는 공통 함수.
         // USB MIDI기기 모드에서는 RTP/USB-Serial을 전혀 시작하지 않고,
         // EngineRegistry.active만 설정해서 UsbMidiDeviceService(안드로이드가 USB
         // MIDI 주변장치로 노출된 동안 시스템이 넣어주는 MIDI)이 이 엔진으로 바로
-        // 전달되도록만 한다.
+        // 전달되도록만 한다. MIDI 파일 모드도 마찬가지로 외부 입력을 열지 않고,
+        // MidiPlayerPanel이 파일에서 읽은 MIDI 메시지를 이 엔진으로 직접 넣는다.
         fun startInputPath(engine: IEngine): Boolean {
             return when {
+                useMidiFile -> {
+                    EngineRegistry.active = engine
+                    midiPlayerPanel.start(engine)
+                    true
+                }
                 useUsbMidiDevice -> {
                     EngineRegistry.active = engine
                     startUsbMidiPeripheral()
@@ -828,6 +849,7 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     }
 
     private fun stopAll() {
+        midiPlayerPanel.stop() // 엔진이 살아있는 상태에서 먼저 정리해야 소리 정리가 엔진에 전달됨
         stopLcdUpdates()
         stopInstrumentPanel()
         when (activeEngineType) {

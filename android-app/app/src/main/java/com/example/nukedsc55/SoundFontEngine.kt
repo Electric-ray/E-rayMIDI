@@ -51,6 +51,9 @@ class SoundFontEngine(val ctx: Context) : IEngine {
     override var onStatus: ((String) -> Unit)? = null
     override var engineRunning = false
 
+    // MIDI 파일 재생 중에는 true (IEngine.bypassWatchdogs 참고) — 유실 없는 입력이라 워치독/재발음 보정을 건너뜀
+    @Volatile override var bypassWatchdogs = false
+
     // ── 사운드폰트 파일 유틸 ─────────────────────────────────────────────
     fun getSoundFontFileList(): List<File> {
         val dir = File(SOUNDFONT_DIR)
@@ -142,7 +145,7 @@ class SoundFontEngine(val ctx: Context) : IEngine {
         // 같은 (채널,노트)이 이미 켜져있다고 추적되는데 새 Note On이 들어오면,
         // 이전 Note Off가 RTP로 유실된 것이므로 워치독 타임아웃을 기다리지 않고 즉시
         // 강제 Note Off를 먼저 보낸다.
-        run {
+        if (!bypassWatchdogs) run {
             if (bytes.size >= 3) {
                 val st0 = bytes[0].toInt() and 0xFF
                 if (st0 and 0xF0 == 0x90 && (bytes[2].toInt() and 0xFF) > 0) {
@@ -156,8 +159,10 @@ class SoundFontEngine(val ctx: Context) : IEngine {
                 }
             }
         }
-        trackSustain(bytes)
-        trackNote(bytes)
+        if (!bypassWatchdogs) {
+            trackSustain(bytes)
+            trackNote(bytes)
+        }
         if (bytes[0] == 0xF0.toByte()) {
             nativeSendSysEx(bytes, bytes.size)
         } else {

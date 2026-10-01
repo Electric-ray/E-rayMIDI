@@ -65,6 +65,17 @@ interface IEngine {
      */
     fun resetEngine(hard: Boolean)
 
+    /**
+     * true면 "유실 없는 입력원"(MIDI 파일 재생)으로 MIDI를 받는 중이라는 뜻.
+     * RTP-MIDI(UDP)와 달리 Note Off/CC64가 유실되지 않으므로, 유실 대비용 노트 워치독(8초)/서스테인
+     * 워치독(10초)과 "같은 음 재발음 시 강제 Note Off" 보정을 건너뛴다. 안 그러면 8초 넘게 지속되는
+     * 음(오르간/스트링 등)이 곡 도중에 끊긴다. 워치독이 없는 엔진(MuntEngine)은 기본 구현(무시)을 그대로 쓴다.
+     */
+    var bypassWatchdogs: Boolean
+        get() = false
+        @Suppress("UNUSED_PARAMETER")
+        set(value) {}
+
     /** 엔진 완전 종료 (RTP/USB 정지 + 네이티브 리소스 해제) */
     fun stop()
 }

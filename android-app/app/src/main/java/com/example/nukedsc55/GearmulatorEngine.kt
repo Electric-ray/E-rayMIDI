@@ -93,6 +93,9 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
     override var onStatus: ((String) -> Unit)? = null
     override var engineRunning = false
 
+    // MIDI 파일 재생 중에는 true (IEngine.bypassWatchdogs 참고) — 유실 없는 입력이라 워치독/재발음 보정을 건너뜀
+    @Volatile override var bypassWatchdogs = false
+
     // ── ROM 유틸 ─────────────────────────────────────────────────────────
     // 88lib는 파일명이 아니라 내용으로 ROM을 식별하므로(§9 "content, never by
     // name"), SC55Engine처럼 정확한 파일명 목록을 직접 비교하지 않고 88lib
@@ -221,8 +224,10 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
-        trackSustain(bytes)
-        trackNote(bytes)
+        if (!bypassWatchdogs) {
+            trackSustain(bytes)
+            trackNote(bytes)
+        }
         trackPartInfo(bytes)
         if (bytes[0] == 0xF0.toByte()) {
             nativeSendSysEx(bytes, bytes.size)

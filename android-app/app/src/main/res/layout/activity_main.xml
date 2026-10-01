@@ -18,7 +18,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="E-rayMIDI v1.5"
+            android:text="E-rayMIDI v1.7"
             android:textColor="#e0e0ff"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -408,84 +408,282 @@
                 android:textSize="10sp"
                 android:textStyle="bold" />
 
-            <RadioGroup
-                android:id="@+id/rgConnection"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <RadioButton
-                    android:id="@+id/rbConnRtp"
-                    android:layout_width="match_parent"
-                    android:layout_height="34dp"
-                    android:layout_marginBottom="5dp"
-                    android:background="@drawable/btn_led_toggle_bg"
-                    android:button="@null"
-                    android:checked="true"
-                    android:drawableStart="@drawable/dot_led_selector"
-                    android:drawablePadding="6dp"
-                    android:gravity="center_vertical"
-                    android:paddingStart="8dp"
-                    android:text="RTP-MIDI"
-                    android:textColor="#e0e0ff"
-                    android:textSize="11sp" />
-
-                <RadioButton
-                    android:id="@+id/rbConnUsb"
-                    android:layout_width="match_parent"
-                    android:layout_height="34dp"
-                    android:layout_marginBottom="5dp"
-                    android:background="@drawable/btn_led_toggle_bg"
-                    android:button="@null"
-                    android:drawableStart="@drawable/dot_led_selector"
-                    android:drawablePadding="6dp"
-                    android:gravity="center_vertical"
-                    android:paddingStart="8dp"
-                    android:text="USB 시리얼"
-                    android:textColor="#e0e0ff"
-                    android:textSize="11sp" />
-
-                <RadioButton
-                    android:id="@+id/rbConnUsbMidi"
-                    android:layout_width="match_parent"
-                    android:layout_height="34dp"
-                    android:background="@drawable/btn_led_toggle_bg"
-                    android:button="@null"
-                    android:drawableStart="@drawable/dot_led_selector"
-                    android:drawablePadding="6dp"
-                    android:gravity="center_vertical"
-                    android:paddingStart="8dp"
-                    android:text="USB MIDI"
-                    android:textColor="#e0e0ff"
-                    android:textSize="11sp" />
-            </RadioGroup>
-
-            <View
+            <ScrollView
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_weight="1" />
+                android:layout_weight="1"
+                android:fillViewport="true"
+                android:scrollbars="none">
 
-            <Button
-                android:id="@+id/btnResetEngine"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/btn_physical_reset"
-                android:enabled="false"
-                android:text="🔄 초기화"
-                android:textColor="#ffffff"
-                android:textSize="12sp" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
 
-            <Button
-                android:id="@+id/btnConnectToggle"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:background="@drawable/btn_physical_primary"
-                android:text="▶ 연결 시작"
-                android:textColor="#ffffff"
-                android:textSize="12sp" />
+                    <RadioGroup
+                        android:id="@+id/rgConnection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <RadioButton
+                            android:id="@+id/rbConnRtp"
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:layout_marginBottom="5dp"
+                            android:background="@drawable/btn_led_toggle_bg"
+                            android:button="@null"
+                            android:checked="true"
+                            android:drawableStart="@drawable/dot_led_selector"
+                            android:drawablePadding="6dp"
+                            android:gravity="center_vertical"
+                            android:paddingStart="8dp"
+                            android:text="RTP-MIDI"
+                            android:textColor="#e0e0ff"
+                            android:textSize="11sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbConnUsb"
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:layout_marginBottom="5dp"
+                            android:background="@drawable/btn_led_toggle_bg"
+                            android:button="@null"
+                            android:drawableStart="@drawable/dot_led_selector"
+                            android:drawablePadding="6dp"
+                            android:gravity="center_vertical"
+                            android:paddingStart="8dp"
+                            android:text="USB 시리얼"
+                            android:textColor="#e0e0ff"
+                            android:textSize="11sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbConnUsbMidi"
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:layout_marginBottom="5dp"
+                            android:background="@drawable/btn_led_toggle_bg"
+                            android:button="@null"
+                            android:drawableStart="@drawable/dot_led_selector"
+                            android:drawablePadding="6dp"
+                            android:gravity="center_vertical"
+                            android:paddingStart="8dp"
+                            android:text="USB MIDI"
+                            android:textColor="#e0e0ff"
+                            android:textSize="11sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbConnMidiFile"
+                            android:layout_width="match_parent"
+                            android:layout_height="34dp"
+                            android:background="@drawable/btn_led_toggle_bg"
+                            android:button="@null"
+                            android:drawableStart="@drawable/dot_led_selector"
+                            android:drawablePadding="6dp"
+                            android:gravity="center_vertical"
+                            android:paddingStart="8dp"
+                            android:text="MIDI 파일"
+                            android:textColor="#e0e0ff"
+                            android:textSize="11sp" />
+                    </RadioGroup>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <Button
+                        android:id="@+id/btnResetEngine"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginBottom="6dp"
+                        android:background="@drawable/btn_physical_reset"
+                        android:enabled="false"
+                        android:text="🔄 초기화"
+                        android:textColor="#ffffff"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnConnectToggle"
+                        android:layout_width="match_parent"
+                        android:layout_height="50dp"
+                        android:background="@drawable/btn_physical_primary"
+                        android:text="▶ 연결 시작"
+                        android:textColor="#ffffff"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </ScrollView>
+
         </LinearLayout>
 
+    </LinearLayout>
+
+    <!-- ================= MIDI 파일 플레이어 바 (LINK=MIDI 파일 일 때만 표시) ================= -->
+    <LinearLayout
+        android:id="@+id/llPlayerBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:background="@drawable/bg_module"
+        android:orientation="vertical"
+        android:padding="4dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvTrackTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="곡 없음"
+                android:textColor="#00cc88"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/tvTrackTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:text="00:00 / 00:00"
+                android:textColor="#aaaacc"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/sbProgress"
+            android:layout_width="match_parent"
+            android:layout_height="18dp"
+            android:max="1000"
+            android:progress="0" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnBrowse"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:background="@drawable/btn_physical_neutral"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="8dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="0dp"
+                android:text="📂"
+                android:textColor="#ccccdd"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnTrackPrev"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_neutral"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="8dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="0dp"
+                android:text="⏮"
+                android:textColor="#ccccdd"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnTrackPlay"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_primary"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="12dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="0dp"
+                android:text="▶"
+                android:textColor="#ffffff"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnTrackStop"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_reset"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="8dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="0dp"
+                android:text="⏹"
+                android:textColor="#ffffff"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnTrackNext"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_neutral"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="8dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="0dp"
+                android:text="⏭"
+                android:textColor="#ccccdd"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnPlayMode"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_neutral"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="6dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="0dp"
+                android:text="⇒ 폴더 전체"
+                android:textColor="#ccccdd"
+                android:textSize="9sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="🔊"
+                android:textColor="#8888aa"
+                android:textSize="11sp" />
+
+            <SeekBar
+                android:id="@+id/sbVolume"
+                android:layout_width="0dp"
+                android:layout_height="18dp"
+                android:layout_marginStart="2dp"
+                android:layout_weight="1"
+                android:max="100"
+                android:progress="100" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>
