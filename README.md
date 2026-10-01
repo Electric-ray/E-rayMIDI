@@ -1,8 +1,9 @@
 # E-ray MIDI
 
 Roland SC-55 / MT-32 / SoundFont(SF2) / **88emu(Roland Sound Canvas·MT-32 계열
-통합 엔진)** 네 가지 재생 엔진과, RTP-MIDI(WiFi) / USB 시리얼 / USB MIDI
-주변장치(peripheral) 세 가지 연결 방식을 하나로 통합한 Android MIDI 재생 앱입니다.
+통합 엔진)** / **S-MU2000(YAMAHA MU2000)** 다섯 가지 재생 엔진과, RTP-MIDI(WiFi) /
+USB 시리얼 / USB MIDI 주변장치(peripheral) 세 가지 연결 방식을 하나로 통합한
+Android MIDI 재생 앱입니다.
 
 
 
@@ -20,9 +21,17 @@ https://github.com/user-attachments/assets/fb366aac-3d51-4342-96ac-d7def23d242d
 원래는 [nukeykt/Nuked-SC55](https://github.com/nukeykt/Nuked-SC55)의 Android 포팅으로
 시작했지만, [munt](https://github.com/munt/munt)(MT-32/CM-32L), FluidSynth(SF2),
 [dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)의 88emu(Roland
-Sound Canvas·MT-32 계열 통합 LLE 엔진) 코어를 함께 통합하면서 단일 엔진 포팅
-프로젝트를 넘어선 4-엔진 레트로 MIDI 모듈이 되었습니다.
+Sound Canvas·MT-32 계열 통합 LLE 엔진), [tarboh/S-MU2000](https://github.com/tarboh/S-MU2000)
+(YAMAHA MU2000 LLE 엔진) 코어를 함께 통합하면서 단일 엔진 포팅 프로젝트를 넘어선
+5-엔진 레트로 MIDI 모듈이 되었습니다.
 
+> **v1.6 패치 노트**: 새 엔진 **S-MU2000**(YAMAHA MU2000, SH7042+SWP30x2 LLE)을
+> 추가했습니다. 88emu와 동일한 렌더 스레드+링버퍼 구조를 따르되, MIDI가 바이트
+> 스트림 방식이라 SysEx도 별도 분기 없이 그대로 흘려보냅니다. 레이아웃이 겹쳐
+> 쌓이는 FrameLayout 구조를 잘못 벗어나 다른 엔진들의 LCD/ROM 버튼이 통째로
+> 사라졌던 레이아웃 버그도 함께 고쳤습니다. 자세한 변경 내역은
+> [아래 "v1.6에서 달라진 점"](#v16에서-달라진-점) 참고.
+>
 > **v1.5 패치 노트**: 불안정했던 S-YXG50(madaha) 엔진을 제거하고, 대신 실제
 > Roland 펌웨어를 그대로 구동하는 **88emu** 엔진을 새로 얹었습니다 — SC-55/SC-88/
 > SC-88Pro/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 하나의 엔진에서
@@ -45,7 +54,7 @@ Sound Canvas·MT-32 계열 통합 LLE 엔진) 코어를 함께 통합하면서 �
 ## 무엇을 할 수 있나요
 
 DOS PC(또는 다른 MIDI 소스)에서 나가는 MIDI 신호를 안드로이드 기기로 가져와서,
-네 가지 레트로 신시사이저 중 하나로 실제 소리를 냅니다.
+다섯 가지 레트로 신시사이저 중 하나로 실제 소리를 냅니다.
 
 ```
                  ┌─ RTP-MIDI (WiFi, ESP32 경유)
@@ -55,11 +64,11 @@ DOS PC/호스트 ───┼─ USB 시리얼 (rs232 to USB 널모뎀케이블)
                                 ▼
                      E-ray MIDI (안드로이드 앱)
                                 │
-        ┌──────────────┬───────┴───────┬──────────────┐
-        ▼              ▼               ▼              ▼
-   SC-55 엔진      MT-32 엔진     SoundFont 엔진     88emu 엔진
- (Nuked-SC55 코어)  (munt 코어)   (FluidSynth 2.6)  (dsp56300/gearmulator)
-   ROM 파일 필요    ROM 파일 필요   .sf2 파일 필요   ROM 파일 필요(11개 기종 선택)
+        ┌──────────────┬───────┬───────┴───────┬──────────────┐
+        ▼              ▼               ▼               ▼              ▼
+   SC-55 엔진      MT-32 엔진     SoundFont 엔진     88emu 엔진     S-MU2000 엔진
+ (Nuked-SC55 코어)  (munt 코어)   (FluidSynth 2.6)  (dsp56300/gearmulator) (tarboh/S-MU2000)
+   ROM 파일 필요    ROM 파일 필요   .sf2 파일 필요   ROM 파일 필요(11개 기종)  ROM 파일 필요(파일명 고정)
         │              │               │              │
         └──────────────┴───────┬───────┴──────────────┘
                                 ▼
@@ -79,7 +88,7 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
 | **타겟 Android 버전** | Android 15 (API 36) | `targetSdk = 36` |
 | **CPU 아키텍처** | **arm64-v8a (64비트 ARM) 전용** | `abiFilters`가 arm64-v8a만 포함 — 32비트 전용 기기(armeabi-v7a만 지원하는 구형 기기)나 x86/x86_64 기기(대부분의 에뮬레이터 포함)에서는 **네이티브 라이브러리가 로드되지 않아 실행되지 않습니다** |
 | **오디오 API** | AAudio (`AAUDIO_PERFORMANCE_MODE_LOW_LATENCY`) | Android 8.0(API 26)부터 제공되는 저지연 오디오 API. API 29 이상에서 이미 충분히 성숙한 상태로 동작 |
-| **RAM** | 최소 3GB 권장 | 88emu는 선택한 기종의 ROM(웨이브 ROM 포함, 최대 수 MB)을 메모리에 올리고, FluidSynth·SoundFont 샘플 데이터도 메모리에 올라감 — 저사양 기기에서는 여유 있게 |
+| **RAM** | 최소 3GB 권장 | 88emu는 선택한 기종의 ROM(웨이브 ROM 포함, 최대 수 MB)을, S-MU2000은 웨이브 ROM 32MB를 메모리에 올리고, FluidSynth·SoundFont 샘플 데이터도 메모리에 올라감 — 저사양 기기에서는 여유 있게 |
 | **저장공간** | ROM/SF2 파일 크기에 따라 다름 | 앱 자체는 가볍지만(APK ~수십MB), SF2 사운드폰트는 파일에 따라 수백MB까지도 가능 |
 | **테스트 기기** | LG Velvet (LG-G910N, Android 10), Galaxy A52s (Android 13) | 전체 개발/디버깅이 이 두 기기에서 이뤄짐. 다른 기기에서도 동작해야 하지만 폭넓게 테스트되지는 않음 |
 
@@ -88,6 +97,10 @@ ESP32 쪽 RTP-MIDI/USB 브리지 펌웨어는 별도 저장소
   현재 `build.gradle.kts`가 **arm64-v8a만** 타겟하도록 고정되어 있습니다(테스트 기기가
   전부 arm64 전용이라 다른 ABI는 실기기 검증을 못 했기 때문). armeabi-v7a/x86/x86_64를
   지원하려면 `abiFilters`를 넓히고 각 ABI별로 실제 빌드가 되는지 검증이 필요합니다.
+- S-MU2000의 SH-2/SWP30 JIT(`a64asm.cpp`)는 **AArch64 어셈블리를 직접 찍어내는
+  코드**라서, 애초에 arm64가 아니면 컴파일 자체가 안 됩니다. 다른 ABI를
+  지원하려면 S-MU2000 쪽은 인터프리터 모드로 강제하거나 x86 JIT 백엔드를
+  따로 연결해야 합니다.
 
 ### 왜 API 29 이상인가?
 - AAudio의 `AAUDIO_PERFORMANCE_MODE_LOW_LATENCY`, `setBufferSizeInFrames` 등 이 앱이
@@ -379,6 +392,55 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
 
 ---
 
+## v1.6에서 달라진 점
+
+### 1. 새 엔진 추가 — S-MU2000 (YAMAHA MU2000)
+[tarboh/S-MU2000](https://github.com/tarboh/S-MU2000) 저장소의 코어(SH7042 CPU +
+SWP30 음원칩 2개)를 새 엔진으로 얹었습니다. 88emu와 같은 철학의 **LLE** 코어로,
+MU2000의 SH7042 펌웨어를 실제로 구동해 소리를 냅니다. 고정 커밋
+`d44b0891cb9550567db818c269122184be6fe158` 기준으로 이식했습니다.
+
+- 업스트림의 Makefile `SRCS` 목록 + `mu2000.cpp`를 그대로 따라, 필요한 최소
+  서브셋(.cpp 19개 + 헤더 43개, 약 1.5MB)만 골라 `app/src/main/cpp/smu2000/
+  source/`에 upstream과 동일한 상대 경로 구조로 벤더링했습니다(데스크톱
+  전용 VST3/CLAP/GUI 프런트엔드는 제외).
+- 88emu(`GearmulatorEngine`)와 다른 핵심 차이:
+  - **MIDI가 바이트 스트림**입니다. 88lib처럼 3바이트로 패킹하지 않고,
+    `midi_in(byte, port)`에 1바이트씩 그대로 흘려보내면 SysEx 경계 처리까지
+    SH7042 펌웨어가 알아서 합니다 — 브리지 쪽 로직이 오히려 더 단순합니다.
+  - **블로킹 "부팅 함수"가 없습니다.** 88lib의 `emu88_open_synth()`처럼 미리
+    다 부팅해주는 함수 대신, `reset()` 직후 `run_sample()`을 계속 호출하는
+    것 자체가 부팅 과정입니다. 펌웨어가 부팅을 마쳤다는 신호는
+    `midi_ready()`이고, 그 전에 들어온 MIDI는 펌웨어가 그냥 무시합니다.
+  - **출력이 44100Hz 고정**입니다(88lib처럼 내부 리샘플러가 없음). AAudio가
+    44100Hz를 못 받는 극히 드문 기기에서는 리샘플링 없이 그대로 재생되어
+    피치가 살짝 달라질 수 있습니다 — 초기 이식에서는 감수합니다.
+  - 초기 이식은 안전하게 **단일 스레드**(`set_threaded(false)`)로 시작했습니다.
+    SWP30 두 개를 별도 스레드로 병렬 처리하는 옵션이 업스트림에 있지만,
+    모바일 big.LITTLE 코어 배치에서 스핀웨이트 지연이 커질 위험이 있어
+    보류했습니다.
+- **출력 스케일 주의**: `run_sample()`이 주는 값은 MAME 내부 스케일
+  (`DAC_FULL_SCALE = 1<<17`)이라, 16비트 PCM으로 쓰려면 `>> 2`를 해야
+  합니다(업스트림 헤더 주석에 명시). 이걸 놓치면 소리가 거의 안 들릴
+  정도로 작게 나옵니다 — 이식 중 미리 발견해서 반영했습니다.
+- ROM은 88lib와 달리 **정확한 파일명**이 필요합니다: 프로그램 ROM은 아무
+  이름이나 되지만, 웨이브 ROM은 `dump/` 폴더 안에 `xv364a0.ic49`,
+  `xv365a0.ic50`, `xw848a0.ic53`, `xw849a0.ic54` 4개 파일이 정확한 이름으로
+  있어야 인식됩니다(아래 "ROM / 사운드폰트 파일 배치" 참고).
+
+### 2. 레이아웃 버그 수정 — 다른 엔진들의 LCD/ROM 버튼이 사라지던 문제
+S-MU2000용 채널 패널을 화면 가운데 영역에 추가하는 과정에서, SC-55 LCD/MT-32
+LCD/SoundFont 패널/88emu 패널이 전부 겹쳐 쌓이는 `FrameLayout`의 **바깥에**
+잘못 형제로 붙이는 실수가 있었습니다. 이 `FrameLayout`은 `weight=1`로 남은
+공간을 전부 차지하도록 설계돼 있는데, 그 뒤에 `match_parent` 높이의 뷰가
+형제로 추가되면서 레이아웃 측정이 꼬여, FrameLayout 자체는 물론 그 아래
+있던 상태 로그/ROM 버튼 줄과 오른쪽 LINK 패널까지 전부 화면에서 사라지는
+증상으로 나타났습니다. S-MU2000 패널을 다른 패널들과 동일하게 FrameLayout
+**안**으로 옮겨서 고쳤습니다 — 이제 다섯 엔진 모두 같은 방식(겹쳐 쌓고
+visibility로 하나만 표시)으로 동작합니다.
+
+---
+
 ## 주요 기능
 
 ### 연결 방식 (셋 중 선택)
@@ -389,7 +451,7 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
   DAW가 직접 이 폰으로 MIDI를 보낼 수 있습니다. (`MidiManager`로 시스템이 제공하는
   USB peripheral 포트를 직접 열어 연결)
 
-### 재생 엔진 (넷 중 선택)
+### 재생 엔진 (다섯 중 선택)
 - **SC-55**: Nuked-SC55 코어를 그대로 이식, MCU 사이클 단위 에뮬레이션. 실제 LCD
   컨트롤러 동작을 픽셀 단위로 재현 (파라미터 레벨미터 애니메이션 포함).
 - **MT-32**: munt 코어 이식. 실제 mt32emu LCD 텍스트를 SC-55처럼 그래픽 도트매트릭스
@@ -400,6 +462,8 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
   SC-88Pro/SC-8820/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 팝업에서
   선택. HD44780 문자 LCD 기종은 실제 기기 텍스트를, 그래픽 LCD 전용 기종(SC-8850)은
   채널별 LED 패널을 자동으로 보여줌.
+- **S-MU2000**: tarboh/S-MU2000 기반 YAMAHA MU2000 LLE 엔진(SH7042+SWP30x2 실제
+  펌웨어 구동). 채널별 Program Change 번호를 LED 패널로 표시.
 
 ### 안정성 보강 (실사용 중 발견된 버그 수정)
 - RTP-MIDI SysEx가 여러 패킷에 걸쳐 전송될 때 경계 처리 오류로 LCD 애니메이션이
@@ -421,6 +485,8 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
   USB MIDI만 끊기던 문제 수정
 - **(v1.5)** 88emu Debug 빌드에서 CPU 에뮬레이션 코어가 무최적화(`-O0`)로 빌드되어
   버벅이던 문제 수정 (위 "v1.5에서 달라진 점 - 4" 참고)
+- **(v1.6)** S-MU2000 패널 추가 과정에서 생긴 레이아웃 버그로 SC-55/MT-32/88emu의
+  LCD·ROM 버튼·상태창이 전부 사라졌던 문제 수정 (위 "v1.6에서 달라진 점 - 2" 참고)
 
 ---
 
@@ -446,6 +512,16 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
   텍스트 디스플레이(HD44780류)만 노출하고 그래픽 프레임버퍼는 제공하지 않아서,
   현재 API로는 Nuked-SC55처럼 픽셀 단위로 재현할 방법이 없습니다. 채널별 LED
   패널로 대신 표시됩니다.
+- **(v1.6) S-MU2000 모드는 아직 LCD가 없고, 채널별 LED 패널만 표시됩니다.**
+  업스트림에 `lcd_render()`로 실제 픽셀 프레임버퍼를 가져오는 API가 있어서
+  구현 자체는 가능해 보이지만, 우선 소리부터 안정화하는 것을 우선해 이번
+  버전에서는 연결하지 않았습니다.
+- **(v1.6) S-MU2000은 초기 이식 상태로, 단일 스레드(`set_threaded(false)`)로만
+  구동합니다.** 업스트림에는 SWP30 음원칩 두 개를 별도 스레드로 병렬 처리하는
+  옵션이 있으나, 모바일 big.LITTLE 코어 배치에서 스핀웨이트 지연이 커질 위험이
+  있어 아직 켜지 않았습니다. 실기 CPU 여유를 더 보고 나중에 검토할 예정입니다.
+- **(v1.6) S-MU2000은 44100Hz 고정 출력**이라(88lib처럼 내부 리샘플러가 없음),
+  AAudio가 44100Hz를 못 받는 극히 드문 기기에서는 피치가 살짝 달라질 수 있습니다.
 - **USB MIDI기기 모드에서, 아주 드물게 연결된 상태로 표시되는데도 소리가 안 나올
   수 있습니다.** 안드로이드 기기의 USB MIDI 주변장치(peripheral) 게이트웨이가
   스스로 재협상되면서 생기는 것으로 추정되는 플랫폼 레벨 이슈입니다(리눅스/MiSTer
@@ -472,6 +548,7 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
 | MT-32 | `/sdcard/Download/rom_munt/` |
 | SoundFont | `/sdcard/Download/soundfont/` (`.sf2` 파일) |
 | 88emu | `/sdcard/Download/rom_gearmulator/` (파일명 무관 — 내용으로 자동 인식, 하위 폴더도 OK) |
+| S-MU2000 | `/sdcard/Download/rom_mu2000/` — `mu2000_flash.bin`(프로그램, 이름 무관) + `dump/xv364a0.ic49`·`xv365a0.ic50`·`xw848a0.ic53`·`xw849a0.ic54`(웨이브 ROM, **파일명 정확히 일치해야 함**) |
 
 SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내" 버튼에서 확인할 수
 있습니다 (모델별로 다를 수 있음). ROM/사운드폰트 파일은 저작권 보호 대상이라
@@ -488,9 +565,9 @@ SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내"
 - CMake 3.22.1
 - Target SDK 36 (Android 15) / Min SDK 29 (Android 10)
 - C++17 / C++20
-- 88emu(gearmulator) 빌드에 별도 도구는 필요 없습니다 — 필요한 소스가 전부
-  `app/src/main/cpp/gearmulator/source/`에 벤더링되어 있어서 표준 CMake/NDK
-  빌드로 충분합니다.
+- 88emu(gearmulator)와 S-MU2000 빌드에 별도 도구는 필요 없습니다 — 필요한
+  소스가 전부 `app/src/main/cpp/gearmulator/source/`와 `app/src/main/cpp/
+  smu2000/source/`에 벤더링되어 있어서 표준 CMake/NDK 빌드로 충분합니다.
 - FluidSynth 관련 사전 준비물과 빌드 순서는 [BUILDING.md](BUILDING.md)에
   자세히 정리되어 있습니다.
 
@@ -502,11 +579,12 @@ SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내"
 android-app/
 └── app/src/main/
     ├── java/com/example/nukedsc55/
-    │   ├── IEngine.kt              # 4개 엔진 공통 인터페이스 (PartInfo 등 공용 타입 포함)
+    │   ├── IEngine.kt              # 5개 엔진 공통 인터페이스 (PartInfo 등 공용 타입 포함)
     │   ├── SC55Engine.kt           # Nuked-SC55 코어 어댑터
     │   ├── MuntEngine.kt           # munt(mt32emu) 코어 어댑터
     │   ├── SoundFontEngine.kt      # FluidSynth 어댑터
     │   ├── GearmulatorEngine.kt    # 88emu(dsp56300/gearmulator) 어댑터, 11개 기종 선택
+    │   ├── MU2000Engine.kt         # S-MU2000(tarboh/S-MU2000) 어댑터
     │   ├── LcdView.kt              # SC-55 그래픽 LCD (네이티브 프레임버퍼 → Bitmap)
     │   ├── MuntLcdView.kt          # MT-32/88emu 공용 그래픽 LCD (텍스트 → 도트매트릭스 렌더링)
     │   ├── RtpMidiSession.kt       # RTP-MIDI(AppleMIDI) 클라이언트
@@ -520,12 +598,16 @@ android-app/
         ├── MuntBridge.cpp          # munt(mt32emu) JNI 브리지
         ├── FluidBridge.cpp         # FluidSynth JNI 브리지
         ├── GearmulatorBridge.cpp   # 88emu JNI 브리지 (전용 렌더 스레드 + 링버퍼)
+        ├── MU2000Bridge.cpp        # S-MU2000 JNI 브리지 (전용 렌더 스레드 + 링버퍼, 바이트스트림 MIDI)
         ├── munt/mt32emu/           # munt 코어 소스 (이식됨)
         ├── nuked-sc55/             # Nuked-SC55 코어 소스
         ├── fluidsynth/             # FluidSynth 공식 Android 프리빌트 (include/ + lib/<abi>/)
-        └── gearmulator/            # 88emu(dsp56300/gearmulator) 벤더링 소스
-            ├── GearmulatorEngine.h/.cpp   # emu88 C API를 감싸는 C++ 어댑터
-            └── source/             # 88lib 구동 최소 서브셋 (upstream과 동일한 경로 구조)
+        ├── gearmulator/            # 88emu(dsp56300/gearmulator) 벤더링 소스
+        │   ├── GearmulatorEngine.h/.cpp   # emu88 C API를 감싸는 C++ 어댑터
+        │   └── source/             # 88lib 구동 최소 서브셋 (upstream과 동일한 경로 구조)
+        └── smu2000/                # S-MU2000(tarboh/S-MU2000) 벤더링 소스
+            ├── MU2000Engine.h/.cpp # mu2000 클래스를 감싸는 C++ 어댑터
+            └── source/             # SH7042+SWP30 구동 최소 서브셋 (upstream과 동일한 경로 구조)
 ```
 
 ---
@@ -538,10 +620,15 @@ android-app/
 - [FluidSynth](https://www.fluidsynth.org/): LGPL-2.1
 - [dsp56300/gearmulator](https://github.com/dsp56300/gearmulator)의 88emu(`88lib`)
   코어: **GPL-3.0**
+- [tarboh/S-MU2000](https://github.com/tarboh/S-MU2000) 코어: BSD-3-Clause,
+  단 MAME 프로젝트에서 유래한 부분(SH-2/SWP30 에뮬레이션 등, `src/mame/` 경로)을
+  포함하고 있어 **MAME License(비상업적 사용만 가능) 조건도 함께 적용될 수
+  있습니다** — 정확한 출처는 저장소의 `NOTICE_S-MU2000.txt`를 참고하세요
 - [Arduino-AppleMIDI-Library](https://github.com/lathoub/Arduino-AppleMIDI-Library) (ESP32 RTP-MIDI): MIT License
 - [usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android): Apache 2.0
 - ESP32 브리지 펌웨어: [Electric-ray/E-RayDSB](https://github.com/Electric-ray/E-RayDSB)
 - SC-55 / MT-32 / 88emu ROM: 별도 라이선스 (Roland Corp.) — 미포함
+- S-MU2000 ROM: 별도 라이선스 (YAMAHA Corp.) — 미포함
 - SF2 사운드폰트: 각 제작자의 라이선스를 따름 — 미포함
 
 > ⚠️ FluidSynth/munt는 LGPL-2.1입니다. 이 앱은 둘 다 **동적 라이브러리(.so)로
@@ -555,3 +642,9 @@ android-app/
 > 배포할 경우 전체 결합물에 대해 소스 공개 등 copyleft 조건이 적용될 수 있습니다.
 > 개인적으로 빌드해서 쓰는 데는 문제가 없지만, 앱을 배포(스토어 업로드, APK 공유
 > 등)할 계획이 있다면 GPLv3 조건을 검토해야 합니다 (법률 자문 아님).
+>
+> ⚠️ S-MU2000(tarboh/S-MU2000) 코어는 저장소 표기상 BSD-3-Clause이지만, MAME
+> 프로젝트에서 유래한 코드(SH-2/SWP30 에뮬레이션 등)를 포함하고 있어 **MAME
+> License(비상업적 사용만 가능) 조건이 함께 적용될 가능성**이 있습니다. Nuked-SC55와
+> 마찬가지로 개인/비상업 용도로만 쓰는 것을 전제로 포함했습니다. 정확한 조건은
+> 저장소의 `NOTICE_S-MU2000.txt`를 직접 확인하세요 (법률 자문 아님).

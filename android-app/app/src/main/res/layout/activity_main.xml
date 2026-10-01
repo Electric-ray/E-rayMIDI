@@ -125,6 +125,20 @@
                     android:text="88emu"
                     android:textColor="#e0e0ff"
                     android:textSize="11sp" />
+
+                <RadioButton
+                    android:id="@+id/rbEngineMu2000"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:background="@drawable/btn_led_toggle_bg"
+                    android:button="@null"
+                    android:drawableStart="@drawable/dot_led_selector"
+                    android:drawablePadding="6dp"
+                    android:gravity="center_vertical"
+                    android:paddingStart="8dp"
+                    android:text="S-MU2000"
+                    android:textColor="#e0e0ff"
+                    android:textSize="11sp" />
             </RadioGroup>
 
             <View
@@ -228,6 +242,18 @@
                             android:orientation="vertical" />
                     </ScrollView>
                 </LinearLayout>
+
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
+
+                    <LinearLayout
+                        android:id="@+id/llMu2000Panel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone" />
+                </ScrollView>
             </FrameLayout>
 
             <!-- 상태 로그 + ROM 상태: 좌우 배치 (표시 정보량에 비해 세로로 쌓으면 폭이 너무 넓었음) -->

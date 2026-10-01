@@ -258,3 +258,32 @@ target_link_libraries(gearmulator-jni
     ${log-lib}
     ${aaudio-lib}
 )
+
+# ---------------------------------------------------------------------------
+# S-MU2000 — YAMAHA MU2000(SH7042+SWP30x2) LLE 엔진 + JNI 공유 라이브러리
+# tarboh/S-MU2000 저장소에서 mu2000 클래스 구동에 필요한 최소 서브셋만
+# vendoring했다(smu2000/source/ 아래, upstream과 동일한 상대 경로 구조).
+# 고정 커밋: d44b0891cb9550567db818c269122184be6fe158
+# ---------------------------------------------------------------------------
+set(SMU2000_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/smu2000)
+
+add_subdirectory(${SMU2000_ROOT}/source ${CMAKE_CURRENT_BINARY_DIR}/smu2000-core)
+
+add_library(
+    mu2000-jni
+    SHARED
+    MU2000Bridge.cpp
+    ${SMU2000_ROOT}/MU2000Engine.cpp
+)
+
+target_include_directories(mu2000-jni PRIVATE
+    ${SMU2000_ROOT}
+)
+
+target_compile_options(mu2000-jni PRIVATE -O3 -fomit-frame-pointer)
+
+target_link_libraries(mu2000-jni
+    smu2000_core
+    ${log-lib}
+    ${aaudio-lib}
+)
