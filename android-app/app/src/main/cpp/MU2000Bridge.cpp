@@ -20,6 +20,9 @@
 #include <jni.h>
 #include <android/log.h>
 #include <aaudio/AAudio.h>
+#include <android/bitmap.h>
+
+#include "AAudioRecover.h"
 
 #include <thread>
 #include <atomic>
@@ -39,6 +42,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using erayMidi::MU2000Engine;
+using erayMidi::Lcd2000Raw;
 
 // ---------------------------------------------------------------------------
 // 오디오 링버퍼 (다른 엔진들과 동일한 락프리 구조)
@@ -94,6 +98,7 @@ static void drainMidiQueue(MU2000Engine& engine) {
 // ---------------------------------------------------------------------------
 static std::unique_ptr<MU2000Engine> s_engine;
 static AAudioStream*     s_stream = nullptr;
+static eray::AAudioRecover s_recover;   // 출력 경로 변경(블루투스 통화 등)으로 끊긴 스트림 자동 복구
 static std::thread       s_renderThread;
 static std::atomic<bool> s_renderThreadRunning{false};
 static std::atomic<bool> s_bootDone{false}; // midi_ready(0)
@@ -124,6 +129,7 @@ static aaudio_result_t openStream(AAudioStream** stream, int32_t rate) {
     AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
     AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
     AAudioStreamBuilder_setDataCallback(builder, audioCallback, nullptr);
+    AAudioStreamBuilder_setErrorCallback(builder, eray::AAudioRecover::onError, &s_recover);
     aaudio_result_t res = AAudioStreamBuilder_openStream(builder, stream);
     AAudioStreamBuilder_delete(builder);
     return res;
@@ -136,6 +142,31 @@ static std::string s_programPath;
 static std::string s_waveDir;
 static std::string s_sintabPath;
 static std::string s_lcdFontPath;
+
+// ---------------------------------------------------------------------------
+// LCD 스냅샷. mu2000::lcd_render()는 에뮬레이션(렌더) 스레드에서만 부를 수 있으므로, 그 스레드가
+// ~30Hz로 도트(384바이트)만 복사해 두고, 픽셀 합성은 JNI(nativeGetLcdFrame, Kotlin 백그라운드
+// 스레드)에서 한다. 내용이 바뀐 경우에만 s_lcdSeq를 올린다 (GearmulatorBridge와 같은 계약).
+// ---------------------------------------------------------------------------
+static std::mutex            s_lcdMtx;
+static Lcd2000Raw            s_lcdRaw;       // 소비자(JNI)용 최신 스냅샷
+static Lcd2000Raw            s_lcdTmp;       // 렌더 스레드 전용 작업 버퍼
+static std::atomic<uint64_t> s_lcdSeq{0};
+
+static void pollLcd() {
+    s_engine->lcdSnapshot(s_lcdTmp);
+    std::lock_guard<std::mutex> lk(s_lcdMtx);
+    if (!erayMidi::lcd2000Equal(s_lcdTmp, s_lcdRaw)) {
+        s_lcdRaw = s_lcdTmp;
+        s_lcdSeq.fetch_add(1, std::memory_order_release);
+    }
+}
+
+static void clearLcd() {
+    std::lock_guard<std::mutex> lk(s_lcdMtx);
+    s_lcdRaw.valid = false;
+    s_lcdSeq.fetch_add(1, std::memory_order_release);
+}
 
 // ---------------------------------------------------------------------------
 // 렌더 스레드: ROM 로딩 + reset() 자체가 "부팅 준비"이고, 그 뒤 run_sample()을
@@ -155,9 +186,8 @@ static void renderLoop(int32_t /*desiredRate*/) {
     if (!s_sintabPath.empty() && !s_engine->loadSintab(s_sintabPath)) {
         LOGE("sintab 로딩 실패(치명적이지 않음, 계속 진행): %s", s_engine->lastError());
     }
-    if (!s_lcdFontPath.empty() && !s_engine->loadLcdFont(s_lcdFontPath)) {
-        LOGE("LCD 폰트 로딩 실패(치명적이지 않음, 계속 진행): %s", s_engine->lastError());
-    }
+    // 경로가 비어 있거나 못 읽어도 내장 대체 폰트가 설치된다 (없으면 LCD가 빈 화면)
+    s_engine->loadLcdFont(s_lcdFontPath);
 
     // 초기 이식: 안전하게 단일 스레드로 시작 (SWP30 두 개를 별도 스레드로
     // 돌리는 옵션은 big.LITTLE 코어 배치에서 스핀웨이트 지연이 커질 위험이
@@ -166,12 +196,21 @@ static void renderLoop(int32_t /*desiredRate*/) {
     s_engine->reset();
     LOGI("render thread: reset 완료, 부팅+렌더 루프 시작");
 
+    // run_sample() 한 번 = 1/44100초. 약 30Hz마다 LCD 도트를 복사한다.
+    const int lcdEvery = static_cast<int>(s_actualRate / 30);
+    int lcdTick = 0;
+
     while (s_renderThreadRunning.load(std::memory_order_relaxed)) {
         drainMidiQueue(*s_engine); // 부팅 전엔 펌웨어가 그냥 무시함
 
         int16_t l, r;
         s_engine->renderSample(l, r);
         ring_push(l, r);
+
+        if (++lcdTick >= lcdEvery) {
+            lcdTick = 0;
+            pollLcd();
+        }
 
         if (!s_bootDone.load(std::memory_order_relaxed) && s_engine->isBootReady()) {
             s_bootDone.store(true, std::memory_order_release);
@@ -241,13 +280,22 @@ Java_com_example_nukedsc55_MU2000Engine_nativeStart(JNIEnv*, jobject)
     s_renderThreadRunning = true;
     s_renderThread = std::thread(renderLoop, s_actualRate);
     AAudioStream_requestStart(s_stream);
+    s_recover.arm(&s_stream, [](AAudioStream** o) { return openStream(o, (int32_t)s_actualRate); });
     LOGI("nativeStart: AAudio @ %u Hz, 렌더 스레드 시작", s_actualRate);
+}
+
+// 출력 경로가 바뀐 뒤(통화 종료 등) Kotlin에서 "스트림을 다시 열어라" 요청
+JNIEXPORT void JNICALL
+Java_com_example_nukedsc55_MU2000Engine_nativeRestartAudio(JNIEnv*, jobject)
+{
+    if (s_running.load()) s_recover.requestRestart();
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_MU2000Engine_nativeStop(JNIEnv*, jobject)
 {
     if (!s_running.load()) return;
+    s_recover.disarm();
     s_running = false;
     s_renderThreadRunning = false;
     if (s_stream) AAudioStream_requestStop(s_stream);
@@ -258,6 +306,7 @@ JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_MU2000Engine_nativeTerm(JNIEnv*, jobject)
 {
     if (!s_initialized) return;
+    s_recover.disarm();
     if (s_running.load()) {
         s_running = false;
         s_renderThreadRunning = false;
@@ -266,6 +315,7 @@ Java_com_example_nukedsc55_MU2000Engine_nativeTerm(JNIEnv*, jobject)
     }
     if (s_stream) { AAudioStream_close(s_stream); s_stream = nullptr; }
     s_engine.reset();
+    clearLcd();
     { std::lock_guard<std::mutex> lk(g_midiMtx); g_midiQ.clear(); }
     ring_reset();
     s_initialized = false;
@@ -306,6 +356,63 @@ JNIEXPORT jint JNICALL
 Java_com_example_nukedsc55_MU2000Engine_nativeGetSampleRate(JNIEnv*, jobject)
 {
     return (jint)s_actualRate;
+}
+
+// ---------------------------------------------------------------------------
+// 실제 기기 LCD 프레임 (사이즈는 고정이지만 GearmulatorEngine과 같은 3개 함수 계약)
+//   nativeGetLcdSize : (width << 16) | height, 아직 스냅샷이 없으면 0
+//   nativeGetLcdSeq  : 화면 내용이 바뀔 때마다 증가
+//   nativeGetLcdFrame: RGBA_8888 비트맵(크기가 nativeGetLcdSize와 정확히 같아야 함)에 합성
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_com_example_nukedsc55_MU2000Engine_nativeGetLcdSize(JNIEnv*, jobject)
+{
+    {
+        std::lock_guard<std::mutex> lk(s_lcdMtx);
+        if (!s_lcdRaw.valid) return 0;
+    }
+    int w = 0, h = 0;
+    erayMidi::lcd2000FrameSize(&w, &h);
+    return (jint)((w << 16) | h);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nukedsc55_MU2000Engine_nativeGetLcdSeq(JNIEnv*, jobject)
+{
+    return (jlong)s_lcdSeq.load(std::memory_order_acquire);
+}
+
+static std::mutex            s_frameMtx;
+static Lcd2000Raw            s_frameCopy;
+static std::vector<uint32_t> s_frameScratch;
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_nukedsc55_MU2000Engine_nativeGetLcdFrame(JNIEnv* env, jobject, jobject bitmap)
+{
+    std::lock_guard<std::mutex> fl(s_frameMtx);
+    {
+        std::lock_guard<std::mutex> lk(s_lcdMtx);
+        s_frameCopy = s_lcdRaw;
+    }
+    if (!s_frameCopy.valid) return JNI_FALSE;
+    int w = 0, h = 0;
+    erayMidi::lcd2000FrameSize(&w, &h);
+
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return JNI_FALSE;
+    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
+    if ((int)info.width != w || (int)info.height != h) return JNI_FALSE;
+
+    s_frameScratch.resize((size_t)w * (size_t)h);
+    erayMidi::lcd2000Render(s_frameCopy, s_frameScratch.data());
+
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return JNI_FALSE;
+    auto* dst = static_cast<uint8_t*>(pixels);
+    for (int y = 0; y < h; ++y)
+        memcpy(dst + (size_t)y * info.stride, &s_frameScratch[(size_t)y * w], (size_t)w * sizeof(uint32_t));
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jstring JNICALL

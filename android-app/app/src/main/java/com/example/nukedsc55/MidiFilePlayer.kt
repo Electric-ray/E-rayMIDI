@@ -35,6 +35,13 @@ class MidiFilePlayer(
     @Volatile var state: State = State.STOPPED
         private set
 
+    /**
+     * 재생/일시정지/정지 상태가 바뀔 때마다 호출 (자연 종료 포함). 어느 스레드에서든 불릴 수 있다.
+     * 앱이 화면을 꺼도 MediaSession 재생 상태를 정확히 유지하는 데 쓴다 — UI 타이머에만 의존하면
+     * 백그라운드에서 세션이 "정지"로 굳어, 블루투스 재생/일시정지 키가 반대로 해석되거나 무시된다.
+     */
+    @Volatile var onStateChanged: (() -> Unit)? = null
+
     /** 곡이 끝까지 자연스럽게 재생되었을 때만 호출 (정지/일시정지/다른 곡 전환에서는 호출 안 됨). 재생 스레드에서 호출됨. */
     @Volatile var onFinished: (() -> Unit)? = null
 
@@ -60,6 +67,7 @@ class MidiFilePlayer(
             seq = s
             pausedPosUs = 0L
         }
+        onStateChanged?.invoke()
     }
 
     /** 정지 상태면 처음부터, 일시정지 상태면 그 자리부터 재생. */
@@ -72,6 +80,7 @@ class MidiFilePlayer(
                 State.STOPPED -> { prepareSongLocked(); startWorkerLocked(s, 0L) }
             }
         }
+        onStateChanged?.invoke()
     }
 
     fun pause() {
@@ -82,10 +91,12 @@ class MidiFilePlayer(
             state = State.PAUSED
             engineProvider()?.allNotesOff()
         }
+        onStateChanged?.invoke()
     }
 
     fun stop() {
         synchronized(lock) { haltLocked() }
+        onStateChanged?.invoke()
     }
 
     fun seekTo(posMs: Long) {
@@ -100,6 +111,7 @@ class MidiFilePlayer(
             pausedPosUs = target
             if (wasPlaying) startWorkerLocked(s, target) else state = State.PAUSED
         }
+        onStateChanged?.invoke()
     }
 
     /** 파일 재생 볼륨 0..100(%). */
@@ -182,6 +194,7 @@ class MidiFilePlayer(
         }
         if (done) {
             engineProvider()?.allNotesOff() // 끝나지 않은 노트/서스테인 정리
+            onStateChanged?.invoke()
             onFinished?.invoke()
         }
     }

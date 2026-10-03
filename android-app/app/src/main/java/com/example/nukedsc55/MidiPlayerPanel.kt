@@ -1,6 +1,7 @@
 package com.example.nukedsc55
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -11,6 +12,7 @@ import android.media.session.PlaybackState
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
 import android.widget.SeekBar
@@ -44,6 +46,7 @@ class MidiPlayerPanel(
 ) {
     companion object {
         private const val KEY_DIR = "midi_dir"
+        private const val KEY_LAST = "midi_last_file"   // 마지막으로 재생한 곡(절대 경로) — 엔진 전환/앱 재시작 후 이어서
         private const val KEY_MODE = "midi_mode"
         private const val KEY_VOL = "midi_volume"
         private const val TICK_MS = 250L
@@ -80,6 +83,9 @@ class MidiPlayerPanel(
     private var mediaSession: MediaSession? = null
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
+    // 통화 같은 "잠깐 뺏김"(LOSS_TRANSIENT)으로 우리가 일시정지했는지 — 포커스가 돌아오면 이어서 재생한다
+    private var resumeOnFocusGain = false
+    private var hasFocus = false
 
     private val ui = Handler(Looper.getMainLooper())
     private var tickerOn = false
@@ -149,6 +155,7 @@ class MidiPlayerPanel(
         val pl = MidiPlaylist(p)
         pl.mode = PlayMode.values().getOrElse(prefs.getInt(KEY_MODE, PlayMode.FOLDER.ordinal)) { PlayMode.FOLDER }
         pl.onTrackChanged = { i, f ->
+            prefs.edit().putString(KEY_LAST, f.absolutePath).apply()
             val title = titleOf(pl, i, f)
             activity.runOnUiThread {
                 tvTitle.text = title
@@ -157,6 +164,10 @@ class MidiPlayerPanel(
             }
         }
         pl.onMessage = { msg -> status(msg) }
+        // 재생 상태가 바뀔 때마다 MediaSession을 갱신한다. 화면이 꺼져 ticker가 멈춘 상태에서도
+        // (자연 종료/다음 곡 자동 재생/비동기 로딩 완료) 세션이 "재생 중"으로 정확해야 블루투스의
+        // 재생/일시정지 키가 올바르게 해석된다.
+        p.onStateChanged = { activity.runOnUiThread { refresh() } }
         player = p
         playlist = pl
 
@@ -169,8 +180,10 @@ class MidiPlayerPanel(
         requestAudioFocus()
         createMediaSession()
 
-        val dir = File(prefs.getString(KEY_DIR, null) ?: defaultDir().absolutePath)
-        loadFolder(dir, null, false)
+        // 마지막으로 들은 곡부터 시작한다 (엔진을 바꿔도, 앱을 다시 시작해도). 그 곡이 지금 폴더에 없으면 1번 곡.
+        val last = prefs.getString(KEY_LAST, null)?.let { File(it) }?.takeIf { it.isFile }
+        val dir = File(prefs.getString(KEY_DIR, null) ?: last?.parentFile?.absolutePath ?: defaultDir().absolutePath)
+        loadFolder(dir, last, false)
         bar.visibility = View.VISIBLE
         startTicker()
     }
@@ -178,6 +191,7 @@ class MidiPlayerPanel(
     /** 연결 종료 (엔진이 살아 있는 상태에서 불러야 소리 정리가 엔진에 전달된다). */
     fun stop() {
         stopTicker()
+        player?.onStateChanged = null
         releaseMediaSession()
         abandonAudioFocus()
         playlist?.shutdown()
@@ -215,23 +229,51 @@ class MidiPlayerPanel(
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener { change ->
                 when (change) {
-                    AudioManager.AUDIOFOCUS_LOSS,
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    // 영구 상실(다른 음악 앱 등): 멈추고 자동 재개하지 않는다
+                    AudioManager.AUDIOFOCUS_LOSS -> {
+                        hasFocus = false
+                        resumeOnFocusGain = false
                         playlist?.pause()
                         activity.runOnUiThread { refresh() }
+                    }
+                    // 잠깐 상실(전화 수신 등): 재생 중이었다면 기억해 두고 포커스가 돌아오면 이어서 재생
+                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        hasFocus = false
+                        if (player?.state == MidiFilePlayer.State.PLAYING) resumeOnFocusGain = true
+                        playlist?.pause()
+                        activity.runOnUiThread { refresh() }
+                    }
+                    AudioManager.AUDIOFOCUS_GAIN -> {
+                        hasFocus = true
+                        // 통화 뒤에는 출력 경로가 바뀌어(SCO -> A2DP) AAudio 스트림이 끊겨 있을 수 있다 — 다시 열어 둔다
+                        boundEngine?.restartAudio()
+                        if (resumeOnFocusGain) {
+                            resumeOnFocusGain = false
+                            // 경로 전환이 끝날 시간을 잠깐 준 뒤 재생
+                            ui.postDelayed({ if (guard()) { playlist?.play(); refresh() } }, 400L)
+                        }
                     }
                     else -> {}
                 }
             }
             .build()
         focusRequest = req
-        am.requestAudioFocus(req)
+        hasFocus = am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    /** 다른 앱에 포커스를 뺏긴 뒤 사용자가 재생을 누르면 다시 요청한다 (안 하면 이후 포커스 이벤트도 못 받는다). */
+    private fun ensureAudioFocus() {
+        val am = audioManager ?: return
+        val req = focusRequest ?: return
+        if (!hasFocus) hasFocus = am.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
     private fun abandonAudioFocus() {
         focusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
         focusRequest = null
         audioManager = null
+        hasFocus = false
+        resumeOnFocusGain = false
     }
 
     private fun createMediaSession() {
@@ -243,6 +285,23 @@ class MidiPlayerPanel(
             override fun onPlay() { if (guard()) { playlist?.play(); afterRemoteCommand() } }
             override fun onPause() { playlist?.pause(); afterRemoteCommand() }
             override fun onStop() { playlist?.stop(); afterRemoteCommand() }
+
+            // 재생/일시정지 토글 키(블루투스/이어폰 가운데 버튼)는 세션에 기록된 상태가 아니라 "실제 플레이어 상태"로
+            // 판단한다. 기본 구현은 PlaybackState를 보고 onPlay/onPause를 고르는데, 세션 상태가 한 박자라도
+            // 어긋나 있으면(재생 중인데 STOPPED로 남아 있는 경우 등) onPlay가 "이미 재생 중"으로 무시돼 키가 먹통이 된다.
+            @Suppress("DEPRECATION")
+            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                val ev = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                if (ev != null && ev.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                    if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0) {
+                        if (player?.state == MidiFilePlayer.State.PLAYING) playlist?.pause()
+                        else if (guard()) playlist?.play()
+                        afterRemoteCommand()
+                    }
+                    return true
+                }
+                return super.onMediaButtonEvent(mediaButtonIntent)
+            }
             override fun onSkipToNext() { if (guard()) { playlist?.next(); afterRemoteCommand() } }
             override fun onSkipToPrevious() { if (guard()) { playlist?.prev(); afterRemoteCommand() } }
         })
@@ -295,6 +354,7 @@ class MidiPlayerPanel(
         val pl = playlist ?: return false
         if (!canPlay()) { status("⏳ SC-55 초기화 중… 잠시 후 다시 눌러주세요"); return false }
         if (pl.files.isEmpty()) { status("⚠️ 재생할 MIDI 파일이 없습니다 — 📂로 폴더를 선택하세요"); return false }
+        ensureAudioFocus()
         return true
     }
 

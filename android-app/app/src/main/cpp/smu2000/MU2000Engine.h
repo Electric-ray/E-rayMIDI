@@ -21,6 +21,8 @@
 #include <memory>
 #include <string>
 
+#include "Lcd2000Renderer.h"
+
 class mu2000;
 
 namespace erayMidi {
@@ -48,6 +50,10 @@ public:
     void midiInByte(uint8_t b);
 
     bool isBootReady() const;       // midi_ready(0) — 이게 true여야 MIDI를 흘려보내도 안전
+
+    // LCD 도트(2행 x 24칸 x 8줄)와 켜짐/콘트라스트. mu2000::lcd_render()는 에뮬레이션 스레드
+    // (renderSample을 부르는 스레드)에서만 호출해야 한다.
+    void lcdSnapshot(Lcd2000Raw& out);
     const char* lastError() const;
 
 private:

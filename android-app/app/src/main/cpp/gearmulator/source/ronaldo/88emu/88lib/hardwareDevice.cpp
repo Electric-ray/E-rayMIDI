@@ -603,7 +603,12 @@ namespace emu88Lib
 		}
 		m_midiIn.erase(m_midiIn.begin(), m_midiIn.begin() + static_cast<ptrdiff_t>(next));
 		for(auto& event : m_midiIn) event.offset -= static_cast<uint32_t>(_samples);
-		if(_samples && isValid()) publishDisplaySnapshot();
+		if(_samples && isValid() &&
+		   m_renderedSamples - m_lastDisplayPublish >= static_cast<uint64_t>(dacSamplerate() / 60.0f))
+		{
+			m_lastDisplayPublish = m_renderedSamples;
+			publishDisplaySnapshot();
+		}
 	}
 
 	void HardwareDevice::writeOutputSample(const synthLib::TAudioOutputs& _outputs, const size_t _index)

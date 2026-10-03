@@ -474,6 +474,30 @@ int emu88_is_display_on(const emu88_context _context, const unsigned _screen)
 	return _context->device->displaySnapshot().screens[_screen].displayOn ? 1 : 0;
 }
 
+int emu88_get_display_raw(const emu88_context _context, const unsigned _screen, emu88_display_info* _info,
+                          uint8_t* _ddram, uint8_t* _cgram, uint8_t* _mono, const size_t _monoCapacity)
+{
+	if(!_context || !_context->device || _screen >= 2 || !_info)
+		return 0;
+	const auto snapshot = _context->device->displaySnapshot();
+	const auto& screen = snapshot.screens[_screen];
+	// HardwareDevice::DisplaySnapshot::Type is None = 0, Character = 1, Graphic = 2.
+	_info->type = static_cast<int>(screen.type);
+	_info->width = screen.width;
+	_info->height = screen.height;
+	_info->display_on = screen.displayOn ? 1 : 0;
+	_info->powered = screen.powered ? 1 : 0;
+	_info->leds = snapshot.leds;
+	_info->revision = snapshot.revision;
+	if(_ddram)
+		std::memcpy(_ddram, screen.ddRam.data(), screen.ddRam.size());
+	if(_cgram)
+		std::memcpy(_cgram, screen.cgRam.data(), screen.cgRam.size());
+	if(_mono && !screen.mono.empty() && screen.mono.size() <= _monoCapacity)
+		std::memcpy(_mono, screen.mono.data(), screen.mono.size());
+	return 1;
+}
+
 // ---- audio
 
 void emu88_render_float(const emu88_context _context, float* _stream, const uint32_t _length)

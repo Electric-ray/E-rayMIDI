@@ -14,6 +14,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <aaudio/AAudio.h>
+#include "AAudioRecover.h"
 #include <fluidsynth.h>
 
 #include <mutex>
@@ -80,6 +81,8 @@ static fluid_settings_t*  s_settings = nullptr;
 static fluid_synth_t*     s_synth = nullptr;
 static int                s_sfontId = -1;
 static AAudioStream*      s_stream = nullptr;
+static int32_t            s_openRate = 48000;    // 스트림이 실제로 열린 레이트 (FluidSynth 레이트와 같다)
+static eray::AAudioRecover s_recover;            // 출력 경로 변경(블루투스 통화 등)으로 끊긴 스트림 자동 복구
 static std::atomic<bool>  s_initialized{false};
 static std::atomic<bool>  s_running{false};
 static std::thread        s_midiThread;
@@ -236,6 +239,7 @@ Java_com_example_nukedsc55_SoundFontEngine_nativeInit(JNIEnv* env, jobject, jstr
         AAudioStreamBuilder_setFormat              (b, AAUDIO_FORMAT_PCM_I16);
         AAudioStreamBuilder_setFramesPerDataCallback(b, kFramesBurst);
         AAudioStreamBuilder_setDataCallback        (b, audioCallback, nullptr);
+        AAudioStreamBuilder_setErrorCallback       (b, eray::AAudioRecover::onError, &s_recover);
         aaudio_result_t r = AAudioStreamBuilder_openStream(b, st);
         AAudioStreamBuilder_delete(b);
         return r;
@@ -256,6 +260,7 @@ Java_com_example_nukedsc55_SoundFontEngine_nativeInit(JNIEnv* env, jobject, jstr
     }
 
     int32_t actualRate = AAudioStream_getSampleRate(s_stream);
+    s_openRate = actualRate;
     s_actualSampleRate.store(actualRate);
 
     int32_t burst = AAudioStream_getFramesPerBurst(s_stream);
@@ -295,6 +300,28 @@ Java_com_example_nukedsc55_SoundFontEngine_nativeInit(JNIEnv* env, jobject, jstr
     return JNI_TRUE;
 }
 
+// AAudioRecover: 출력 경로가 바뀌어(블루투스 통화 후 A2DP 복귀 등) 스트림이 끊겼을 때,
+// 처음 열렸던 레이트 그대로 다시 연다. 엔진 내부 레이트/리샘플 설정이 그대로 유효하도록 같은 레이트를 고집한다.
+static aaudio_result_t reopenAudioStream(AAudioStream** out) {
+    aaudio_result_t r = AAUDIO_ERROR_UNAVAILABLE;
+    for (aaudio_sharing_mode_t mode : {AAUDIO_SHARING_MODE_SHARED, AAUDIO_SHARING_MODE_EXCLUSIVE}) {
+        AAudioStreamBuilder* b = nullptr;
+        AAudio_createStreamBuilder(&b);
+        AAudioStreamBuilder_setDirection           (b, AAUDIO_DIRECTION_OUTPUT);
+        AAudioStreamBuilder_setPerformanceMode     (b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+        AAudioStreamBuilder_setSharingMode         (b, mode);
+        AAudioStreamBuilder_setSampleRate          (b, s_openRate);
+        AAudioStreamBuilder_setChannelCount        (b, kChannels);
+        AAudioStreamBuilder_setFormat              (b, AAUDIO_FORMAT_PCM_I16);
+        AAudioStreamBuilder_setFramesPerDataCallback(b, kFramesBurst);
+        AAudioStreamBuilder_setDataCallback        (b, audioCallback, nullptr);
+        AAudioStreamBuilder_setErrorCallback       (b, eray::AAudioRecover::onError, &s_recover);
+        r = AAudioStreamBuilder_openStream(b, out);
+        AAudioStreamBuilder_delete(b);
+        if (r == AAUDIO_OK) return r;
+    }
+    return r;
+}
 JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_SoundFontEngine_nativeStart(JNIEnv*, jobject)
 {
@@ -309,13 +336,22 @@ Java_com_example_nukedsc55_SoundFontEngine_nativeStart(JNIEnv*, jobject)
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     AAudioStream_requestStart(s_stream);
+    s_recover.arm(&s_stream, [](AAudioStream** o) { return reopenAudioStream(o); });
     LOGI("nativeStart: AAudio + 렌더 스레드 + MIDI 스레드 시작 (ring=%d)", ring_size());
+}
+
+// 출력 경로가 바뀐 뒤(통화 종료 등) Kotlin에서 "스트림을 다시 열어라" 요청
+JNIEXPORT void JNICALL
+Java_com_example_nukedsc55_SoundFontEngine_nativeRestartAudio(JNIEnv*, jobject)
+{
+    if (s_running.load()) s_recover.requestRestart();
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_SoundFontEngine_nativeStop(JNIEnv*, jobject)
 {
     if (!s_running.load()) return;
+    s_recover.disarm();
     s_running.store(false);
     if (s_stream) AAudioStream_requestStop(s_stream);
     s_midiThreadRunning.store(false);
@@ -329,6 +365,7 @@ JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_SoundFontEngine_nativeTerm(JNIEnv*, jobject)
 {
     if (!s_initialized.load()) return;
+    s_recover.disarm();
     if (s_running.load()) {
         s_running.store(false);
         if (s_stream) AAudioStream_requestStop(s_stream);

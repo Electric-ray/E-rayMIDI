@@ -76,6 +76,14 @@ interface IEngine {
         @Suppress("UNUSED_PARAMETER")
         set(value) {}
 
+    /**
+     * 오디오 출력 스트림만 다시 연다 (엔진 상태/소리 설정은 그대로).
+     * 블루투스 통화가 끝나 A2DP로 돌아오거나 이어폰을 뽑고 꽂는 등 출력 경로가 바뀌면 AAudio 스트림이
+     * 끊기는데, 네이티브 쪽이 대부분 스스로 복구하지만(AAudioRecover) 오디오 포커스를 되찾은 시점에 한 번 더
+     * 확실히 하기 위해 쓴다. 지원하지 않는 엔진은 기본 구현(무시)을 쓴다.
+     */
+    fun restartAudio() {}
+
     /** 엔진 완전 종료 (RTP/USB 정지 + 네이티브 리소스 해제) */
     fun stop()
 }

@@ -45,6 +45,8 @@ class MuntEngine(val ctx: Context) : IEngine {
     external fun nativeInit(ctrlRom: ByteArray, pcmRom: ByteArray): Boolean
     external fun nativeStart()
     external fun nativeStop()
+    external fun nativeRestartAudio()
+    override fun restartAudio() { if (engineRunning) nativeRestartAudio() }
     external fun nativeTerm()
     external fun nativeSendMidi(packed: Int)
     external fun nativeSendSysEx(data: ByteArray, len: Int)

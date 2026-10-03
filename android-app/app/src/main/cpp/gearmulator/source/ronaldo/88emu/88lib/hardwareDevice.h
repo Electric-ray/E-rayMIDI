@@ -171,6 +171,9 @@ namespace emu88Lib
 		std::deque<PanelCommand> m_panelCommands;
 		uint64_t m_nextPanelCommandSample = 0;
 		uint64_t m_renderedSamples = 0;
+		// E-rayMIDI: publishDisplaySnapshot() allocates (strings, SC-8850 dot grid), and processAudio()
+		// runs once per render chunk, so it is limited to ~60 Hz of rendered time.
+		uint64_t m_lastDisplayPublish = 0;
 		uint32_t m_transportGeneration = 0;
 		uint64_t m_activeChannels = 0;
 		uint64_t m_heldChannels = 0;

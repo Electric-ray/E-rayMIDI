@@ -99,6 +99,43 @@ uint32_t GearmulatorEngine::getPanelLeds() const {
     return m_context ? emu88_get_panel_leds(m_context) : 0;
 }
 
+bool GearmulatorEngine::getDisplayRaw(unsigned screen, Lcd88Raw& out) const {
+    out.type = 0;
+    out.monoLen = 0;
+    if (!m_context) return false;
+    emu88_display_info info{};
+    if (!emu88_get_display_raw(m_context, screen, &info, out.dd, out.cg, out.mono, sizeof(out.mono)))
+        return false;
+    out.type = info.type;
+    out.width = info.width;
+    out.height = info.height;
+    out.displayOn = info.display_on != 0;
+    out.powered = info.powered != 0;
+    out.leds = info.leds;
+    if (info.type == 2) {
+        const long long dots = static_cast<long long>(info.width) * info.height;
+        if (dots <= 0 || dots > Lcd88Raw::kMonoMax) { out.type = 0; return false; }
+        out.monoLen = static_cast<int>(dots);
+    }
+    return out.type != 0;
+}
+
+Lcd88Look GearmulatorEngine::lcdLook() const {
+    switch (m_deviceId) {
+        case EMU88_DEVICE_SC8850:
+            return Lcd88Look::Sc8850;
+        case EMU88_DEVICE_MT32_OLD:
+        case EMU88_DEVICE_MT32_NEW:
+        case EMU88_DEVICE_CM32L:
+        case EMU88_DEVICE_CM32LN:
+        case EMU88_DEVICE_CM32P:
+        case EMU88_DEVICE_CM64:
+            return Lcd88Look::CmGreen;
+        default:
+            return Lcd88Look::Sc55Glass;
+    }
+}
+
 namespace {
 struct DeviceEntry { const char* cliId; emu88_device_id id; };
 constexpr DeviceEntry kDeviceTable[] = {

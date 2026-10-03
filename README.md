@@ -25,6 +25,17 @@ Sound Canvas·MT-32 계열 통합 LLE 엔진), [tarboh/S-MU2000](https://github.
 (YAMAHA MU2000 LLE 엔진) 코어를 함께 통합하면서 단일 엔진 포팅 프로젝트를 넘어선
 5-엔진 레트로 MIDI 모듈이 되었습니다.
 
+> **v1.9 패치 노트**: **88emu와 S-MU2000에서 실제 기기 LCD 화면**을 그대로
+> 보여줍니다. SC-55/SC-88 계열의 유리 LCD(악기명, 파트 번호, 레벨미터, L/R
+> 램프), SC-8850의 160×64 그래픽 LCD, MT-32/CM의 연두색 도트 화면, 그리고
+> MU2000의 LCD(레벨미터, 음색명, VOL/EXP 막대, PAN 바늘, REV/CHO/VAR 부채꼴,
+> KEY 7세그먼트)까지 펌웨어가 그리는 그대로 나옵니다. 또 **블루투스 통화가 끝난
+> 뒤 소리가 영영 안 나던 문제**(AAudio 스트림이 끊긴 채 방치되던 것)와 **블루투스
+> 재생/일시정지 키가 먹통이던 문제**(MediaSession 재생 상태가 굳어 있던 것)를
+> 고쳤고, MIDI 파일 플레이어가 **마지막으로 들은 곡을 기억**해 엔진을 바꾸거나
+> 앱을 다시 켜도 그 곡부터 이어집니다. 자세한 변경 내역은
+> [아래 "v1.9에서 달라진 점"](#v19에서-달라진-점) 참고.
+>
 > **v1.7 패치 노트**: 외부 PC 없이 **기기에 저장된 .mid/.midi/.kar 파일을 직접
 > 재생**할 수 있는 MIDI 파일 플레이어를 추가했습니다. LINK 패널에서
 > "MIDI 파일"을 선택하면 재생/일시정지/정지/이전곡/다음곡/볼륨 조절과 폴더 단위
@@ -509,6 +520,107 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
 
 ---
 
+## v1.9에서 달라진 점
+
+### 1. 88emu — 실제 LCD 화면 표시 (SC-55/SC-88 계열, SC-8850, MT-32/CM)
+88emu는 원본 Roland 펌웨어를 그대로 실행하는 LLE 엔진이라, LCD에 무엇이 나올지는
+에뮬레이터가 아니라 **펌웨어가 LCD 컨트롤러에 써 넣는 값**이 결정합니다. 지금까지는
+이 값을 앱으로 꺼낼 출구가 없어서 문자 텍스트(MT-32류)나 LED 패널로 대신했는데,
+이번에 출구를 만들고 기종별 모양대로 그리게 했습니다.
+
+| 기종 | 펌웨어가 주는 데이터 | 앱에서 그리는 모양 |
+|---|---|---|
+| SC-55 / SC-55mk2 / SC-155 / SC-88 / SC-88VL / SC-88Pro | HD44780 DDRAM 80B + CGRAM 64B | 741×268 주황 유리 LCD: 3자 번호+16자 악기명, LEVEL/PAN/REVERB/CHORUS/K SHIFT/MIDI CH 숫자, 16파트 레벨미터(CGRAM 글리프), L/R 램프 |
+| SC-8850 | 160×64 흑백 도트 | 4배 확대(640×256), 주황 유리 위 검은 도트 |
+| MT-32 / CM-32L / CM-32P / CM-64 | 120×9 또는 96×18 도트 | 연두색 도트매트릭스 (기존 텍스트 기반 `MuntLcdView` 대신 실제 도트) |
+| SC-8820 / XP-GS / VE-GS Pro 등 LCD 없는 기종 | — | 기존처럼 채널별 LED 패널 |
+
+- **C API 추가**: 88lib `c_interface.h/.cpp`에 `emu88_get_display_raw()`를 추가했습니다
+  (표시 종류, 크기, 전원/표시 on-off, DDRAM/CGRAM/도트 그리드를 한 번에 복사).
+- **스레드 규칙**: 88lib 컨텍스트는 스레드 세이프하지 않으므로, 렌더 스레드가 약
+  33ms마다 원시 데이터(수십~수천 바이트)만 복사해 두고, **픽셀 합성은 Kotlin
+  백그라운드 스레드(JNI `nativeGetLcdFrame`)에서** 합니다 — 오디오 렌더 스레드에는
+  비트맵 합성 비용을 얹지 않습니다. 내용이 바뀐 경우에만 변경 카운터가 올라가므로
+  UI는 변화가 없는 프레임을 건너뜁니다.
+- **렌더러**: `Lcd88Renderer.cpp`(순수 C++). SC-55/88 계열의 글자 배치는
+  gearmulator의 `88emuplayer/ui/panel.cpp`(= Nuked-SC55의 `LCD_Render`와 같은 좌표)를
+  따르고, 모든 픽셀의 알파를 명시적으로 0xFF로 씁니다.
+- **일반화된 프레임 공급**: `LcdFramePump.kt`가 엔진이 합성한 프레임(크기가 기종마다
+  다름)을 `LcdView`에 약 30fps로 공급합니다. 크기가 바뀌면 비트맵 3장을 새로
+  만들고, 표시 중이거나 그리는 중인 비트맵에는 절대 쓰지 않습니다.
+- **88lib 소폭 수정**: `HardwareDevice`가 렌더 청크마다(초당 약 250회) 문자열/도트
+  벡터를 할당하며 스냅샷을 갱신하던 것을 **렌더된 시간 기준 약 60Hz로 제한**했습니다.
+  업스트림 코드를 바꾼 부분이므로 gearmulator를 다시 가져올 때 이 변경을 유지해야
+  합니다.
+
+### 2. S-MU2000 — 실제 LCD 화면 + "LCD가 텅 비던" 버그 수정
+MU2000의 LCD는 글자 한 줄이 아니라 유리판의 "면"마다 의미가 다릅니다. 업스트림 GUI
+(`src/ui/panel.cpp`의 `draw_lcd_body`)의 배치를 그대로 옮겨 그렸습니다.
+
+- **위쪽 면**: 파트 레벨미터 18개 + 음색명/번호 8자
+- **아래쪽 면**: 파트 번호(`01`), 뱅크(`A01`), 악기 모양 그림
+- **23번째 칸의 제어 비트**: VOL/EXP 막대, PAN 바늘(7곳), REV/CHO/VAR 센드량 부채꼴,
+  KEY(노트 시프트) 부호+7세그먼트 두 자리, XG/GS/PERFORM 모드 표시, ▼ 커서
+- 창 아래 인쇄 문구(PART, VOL …)는 작은 내장 폰트로 직접 그렸고, UTIL > SYS의
+  Contrast(1~8) 값에 따라 점의 진하기가 바뀝니다. 크기는 932×248 고정입니다.
+- 렌더 스레드가 약 33ms마다 도트 384바이트만 복사하고(`lcd_render()`는 에뮬레이션
+  스레드에서만 호출 가능), 합성은 JNI에서 하는 구조는 88emu와 같은 3함수 계약
+  (`nativeGetLcdSize/Seq/Frame`)입니다.
+- **버그 수정 — 화면이 초록 배경만 나오던 문제**: `hd44780_device::render()`는 문자 ROM
+  (CGROM)이 없으면 전부 0인 이미지를 돌려주는데, 앱이 LCD 폰트 경로를 항상 빈
+  문자열로 넘기고 있었습니다(소리는 폰트와 무관해서 정상). 이제 진짜
+  `hd44780u_b04.bin`(4096B)을 `rom_mu2000/`, `rom_mu2000/standin/`에서 찾고, 없거나
+  못 읽으면 **내장 5×8 폰트(`lcd_cgrom_fallback.h`)로 CGROM을 채웁니다**. 내장 폰트는
+  ASCII는 정상이지만 기호 글자 모양이 실기와 조금 다를 수 있습니다.
+
+### 3. 블루투스 통화 후 소리가 영영 안 나던 문제 수정
+- **원인 1 — 끊긴 스트림 방치**: 블루투스 통화(A2DP → SCO → A2DP)나 이어폰 탈착처럼
+  출력 경로가 바뀌면 AAudio는 스트림을 `DISCONNECTED`로 만들고 데이터 콜백을 영영
+  멈춥니다. 다섯 엔진 브리지 어디에도 에러 콜백이 없어서 앱은 계속 "재생 중"인데
+  소리만 안 났습니다. 공용 헤더 **`AAudioRecover.h`**를 만들어 모든 브리지에
+  연결했습니다. 에러 콜백이 `DISCONNECTED`를 받으면(콜백 안에서는 닫지 않고 요청만
+  걸어 둡니다), 또는 감시 스레드가 500ms마다 확인하다가 스트림이 `DISCONNECTED`이거나
+  STARTED인데 2초 넘게 `getFramesRead`가 늘지 않으면(3초 이상 간격) 스트림을 닫고
+  **처음 열렸던 레이트 그대로** 다시 열어 start 합니다. 데이터 콜백은 링버퍼 pop만
+  하므로 새 스트림이 뜨면 렌더 스레드는 그대로 이어집니다.
+- **원인 2 — 포커스가 돌아와도 재개 안 함**: 전화 수신으로 `AUDIOFOCUS_LOSS_TRANSIENT`가
+  오면 일시정지만 하고 돌아와도 이어서 재생하지 않았습니다. 이제 "재생 중이었다"를
+  기억해 두었다가 `AUDIOFOCUS_GAIN`이 오면 스트림을 한 번 더 다시 열고(`IEngine.
+  restartAudio()`) 0.4초 뒤 이어서 재생합니다. 다른 앱에 영구로 뺏긴 경우(`LOSS`)는
+  자동 재개하지 않고, 사용자가 재생을 누르면 포커스를 다시 요청합니다.
+
+### 4. 블루투스 재생/일시정지 키가 먹통이던 문제 수정
+- **원인**: MediaSession의 재생 상태를 화면 갱신 타이머가 올리는데, 화면을 끄면 그
+  타이머가 멈춥니다. 곡이 비동기로 로딩되어 재생이 시작돼도 세션은 "정지"로 남고,
+  이때 재생/일시정지 토글 키가 오면 안드로이드 기본 처리가 "정지 상태니까 `onPlay`"를
+  골라 "이미 재생 중"으로 무시되었습니다. (다음곡/이전곡 키는 상태와 무관해서 멀쩡했습니다.)
+- **수정**: `MidiFilePlayer`에 상태 변경 콜백(`onStateChanged`)을 추가해 재생/일시정지/
+  정지/자연 종료마다 세션을 즉시 갱신합니다. 또 `KEYCODE_MEDIA_PLAY_PAUSE`는 세션에 적힌
+  상태가 아니라 **실제 플레이어 상태**로 토글하도록 `onMediaButtonEvent`를 직접
+  처리합니다.
+
+### 5. 마지막으로 들은 곡 기억
+곡이 바뀔 때마다 마지막 파일 경로를 저장(`midi_last_file`)하고, 플레이어를 시작할 때
+그 곡을 재생목록에서 선택된 상태로 올립니다 — 엔진을 바꾸거나 앱을 다시 시작해도
+1번 곡부터가 아니라 마지막 곡이 선택됩니다. 저장된 곡이 현재 폴더에 없으면 예전처럼
+1번 곡입니다. (곡 안의 재생 위치까지는 기억하지 않습니다.)
+
+### 6. 업스트림 갱신 — 시도했다가 되돌린 것
+- **S-MU2000 코어를 업스트림 최신(`b26bfa5`)으로 올리면 "연결" 시 앱이 종료되어**
+  기준 시점(`7d0fb8a`, 9/28)의 코어로 되돌렸습니다. 새로 들어오는 것은 AWM2 휴지 음성
+  건너뛰기, MEG 이펙트 구간 건너뛰기(비트 단위로 동일하다고 함), 리버브 꼬리 버그
+  수정(ARM JIT 포함), 음량 절삭 제거, 이펙트 C++ 구현(가벼운 모드용 헤더 71개),
+  그리고 새 `roms_dir.h`입니다. 크래시 원인은 로그를 못 받아 미확정이며, 가장
+  의심되는 곳은 새 `roms_dir.h`의 경로 처리와 새 swp30 최적화/ARM JIT입니다.
+  `adb logcat`으로 로그를 받으면 단계별(swp30 → mu2000.cpp 순)로 다시 적용할 수
+  있습니다.
+- **참고**: 우리 앱은 S-MU2000의 가벼운 모드(`set_native_engine`/`set_native_fx`)를
+  아직 켜지 않은 순수 풀 에뮬레이션입니다. 업스트림 문서상 CPU를 2~3배 줄일 수 있어
+  장기 후보입니다.
+- 88emu 쪽 후보(LA32 개선, XP 칩 수정, JIT 컴파일 워커)는 적용하지 않았습니다.
+
+---
+
 ## 주요 기능
 
 ### 연결 방식 (넷 중 선택)
@@ -522,6 +634,7 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
   재생. 재생/일시정지/정지/이전곡/다음곡/볼륨 조절과 폴더 단위 재생목록(1곡/
   폴더 전체/폴더 반복/1곡 반복)을 지원하고, 블루투스 차량(AVRCP)이나 유선
   이어폰 리모컨의 재생/정지/이전곡/다음곡 버튼으로도 조작할 수 있습니다.
+  마지막으로 들은 곡을 기억해 엔진을 바꾸거나 앱을 다시 켜도 그 곡부터 이어집니다.
 
 ### 재생 엔진 (다섯 중 선택)
 - **SC-55**: Nuked-SC55 코어를 그대로 이식, MCU 사이클 단위 에뮬레이션. 실제 LCD
@@ -532,10 +645,11 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
 - **SoundFont**: FluidSynth 2.6.0 기반 `.sf2` 재생. 채널별 프리셋명 실시간 표시.
 - **88emu**: dsp56300/gearmulator 기반 Roland 통합 LLE 엔진. SC-55/SC-88/
   SC-88Pro/SC-8820/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 팝업에서
-  선택. HD44780 문자 LCD 기종은 실제 기기 텍스트를, 그래픽 LCD 전용 기종(SC-8850)은
-  채널별 LED 패널을 자동으로 보여줌.
+  선택. **펌웨어가 그리는 실제 LCD를 기종별 모양 그대로 표시**(SC-55/SC-88 계열 유리 LCD와
+  레벨미터, SC-8850 그래픽 LCD, MT-32/CM 도트 화면). LCD가 없는 기종은 채널별 LED 패널.
 - **S-MU2000**: tarboh/S-MU2000 기반 YAMAHA MU2000 LLE 엔진(SH7042+SWP30x2 실제
-  펌웨어 구동). 채널별 Program Change 번호를 LED 패널로 표시.
+  펌웨어 구동). 실제 MU2000 LCD(레벨미터, 음색명, VOL/EXP·PAN·REV/CHO/VAR·KEY 표시)와
+  채널별 Program Change 번호 LED 패널을 함께 표시.
 
 ### 안정성 보강 (실사용 중 발견된 버그 수정)
 - RTP-MIDI SysEx가 여러 패킷에 걸쳐 전송될 때 경계 처리 오류로 LCD 애니메이션이
@@ -559,6 +673,11 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
   버벅이던 문제 수정 (위 "v1.5에서 달라진 점 - 4" 참고)
 - **(v1.6)** S-MU2000 패널 추가 과정에서 생긴 레이아웃 버그로 SC-55/MT-32/88emu의
   LCD·ROM 버튼·상태창이 전부 사라졌던 문제 수정 (위 "v1.6에서 달라진 점 - 2" 참고)
+- **(v1.9)** 블루투스 통화 등으로 출력 경로가 바뀌어 AAudio 스트림이 끊기면 소리가 영영
+  안 나던 문제 수정 — 다섯 엔진 모두 끊긴 스트림을 자동으로 되살림 ("v1.9 - 3" 참고)
+- **(v1.9)** 전화가 끝나 오디오 포커스를 되찾아도 MIDI 파일 재생이 재개되지 않던 문제 수정
+- **(v1.9)** 화면이 꺼진 상태에서 블루투스 재생/일시정지 키가 무시되던 문제 수정 ("v1.9 - 4" 참고)
+- **(v1.9)** S-MU2000 LCD가 초록 배경만 나오던 문제(문자 ROM 미설치) 수정 ("v1.9 - 2" 참고)
 
 ---
 
@@ -579,15 +698,15 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
 - SoundFont 모드는 GM 표준까지만 지원하며 Roland GS 전용 확장은 표현하지 못합니다.
 - SC-55 LCD 렌더링에 미세한 깜빡임이 있을 수 있습니다(화면이 깨지거나 겹쳐 보이는
   더 심각한 증상은 v1.4에서 data race를 고쳐서 해결됨 — 위 "v1.4에서 달라진 점" 참고).
-- **88emu 모드에서 SC-8850을 고르면 LCD 영역이 항상 접혀 있습니다.** SC-8850은
-  진짜 그래픽 LCD(문자가 아닌 픽셀 프레임버퍼)를 쓰는데, 88lib의 공개 C API가
-  텍스트 디스플레이(HD44780류)만 노출하고 그래픽 프레임버퍼는 제공하지 않아서,
-  현재 API로는 Nuked-SC55처럼 픽셀 단위로 재현할 방법이 없습니다. 채널별 LED
-  패널로 대신 표시됩니다.
-- **(v1.6) S-MU2000 모드는 아직 LCD가 없고, 채널별 LED 패널만 표시됩니다.**
-  업스트림에 `lcd_render()`로 실제 픽셀 프레임버퍼를 가져오는 API가 있어서
-  구현 자체는 가능해 보이지만, 우선 소리부터 안정화하는 것을 우선해 이번
-  버전에서는 연결하지 않았습니다.
+- **(v1.9 해결) 88emu SC-8850 LCD**: 이전에는 API가 그래픽 프레임버퍼를 노출하지 않아 LCD
+  영역이 접혀 있었으나, `emu88_get_display_raw()`를 추가해 실제 그래픽 LCD를 표시합니다.
+  LCD가 없는 기종(SC-8820, XP-GS, VE-GS Pro 등)은 여전히 채널별 LED 패널만 나옵니다.
+- **(v1.9 해결) S-MU2000 LCD**: `lcd_render()`의 도트를 가져와 실제 LCD로 그립니다.
+  진짜 `hd44780u_b04.bin`이 없으면 내장 폰트를 쓰므로 기호 글자 모양이 실기와 조금
+  다를 수 있습니다. 상단 눈금 띠의 A1/A2·MIC/LINE 박스와 선은 아직 그리지 않습니다
+  (파라미터 표시에는 영향 없음).
+- **(v1.9) S-MU2000 업스트림 최신 코어로는 아직 못 올립니다.** 최신(`b26bfa5`)으로 교체하면
+  연결 시 앱이 종료되어 기준 시점의 코어를 유지 중입니다 ("v1.9 - 6" 참고).
 - **(v1.6) S-MU2000은 초기 이식 상태로, 단일 스레드(`set_threaded(false)`)로만
   구동합니다.** 업스트림에는 SWP30 음원칩 두 개를 별도 스레드로 병렬 처리하는
   옵션이 있으나, 모바일 big.LITTLE 코어 배치에서 스핀웨이트 지연이 커질 위험이
@@ -625,7 +744,7 @@ PAUSE 명령은 분리된 호출이라 `MidiPlaylist`에 명시적 `play()`/`pau
 | MT-32 | `/sdcard/Download/rom_munt/` |
 | SoundFont | `/sdcard/Download/soundfont/` (`.sf2` 파일) |
 | 88emu | `/sdcard/Download/rom_gearmulator/` (파일명 무관 — 내용으로 자동 인식, 하위 폴더도 OK) |
-| S-MU2000 | `/sdcard/Download/rom_mu2000/` — `mu2000_flash.bin`(프로그램, 이름 무관) + `dump/xv364a0.ic49`·`xv365a0.ic50`·`xw848a0.ic53`·`xw849a0.ic54`(웨이브 ROM, **파일명 정확히 일치해야 함**) |
+| S-MU2000 | `/sdcard/Download/rom_mu2000/` — `mu2000_flash.bin`(프로그램, 이름 무관) + `dump/xv364a0.ic49`·`xv365a0.ic50`·`xw848a0.ic53`·`xw849a0.ic54`(웨이브 ROM, **파일명 정확히 일치해야 함**). (선택) `hd44780u_b04.bin`(LCD 문자 ROM 4KB, 없으면 내장 폰트 사용) |
 
 SC-55에 정확히 필요한 ROM 파일명은 앱 실행 후 "ROM 파일 안내" 버튼에서 확인할 수
 있습니다 (모델별로 다를 수 있음). ROM/사운드폰트 파일은 저작권 보호 대상이라
@@ -666,7 +785,8 @@ android-app/
     │   ├── SoundFontEngine.kt      # FluidSynth 어댑터
     │   ├── GearmulatorEngine.kt    # 88emu(dsp56300/gearmulator) 어댑터, 11개 기종 선택
     │   ├── MU2000Engine.kt         # S-MU2000(tarboh/S-MU2000) 어댑터
-    │   ├── LcdView.kt              # SC-55 그래픽 LCD (네이티브 프레임버퍼 → Bitmap)
+    │   ├── LcdView.kt              # 그래픽 LCD 표시 뷰 (비트맵을 종횡비 유지로 표시)
+    │   ├── LcdFramePump.kt         # 엔진이 합성한 LCD 프레임을 ~30fps로 LcdView에 공급 (88emu/S-MU2000 공용)
     │   ├── MuntLcdView.kt          # MT-32/88emu 공용 그래픽 LCD (텍스트 → 도트매트릭스 렌더링)
     │   ├── RtpMidiSession.kt       # RTP-MIDI(AppleMIDI) 클라이언트
     │   ├── UsbMidiManager.kt       # USB 시리얼 입력 (usb-serial-for-android)
@@ -684,14 +804,19 @@ android-app/
         ├── FluidBridge.cpp         # FluidSynth JNI 브리지
         ├── GearmulatorBridge.cpp   # 88emu JNI 브리지 (전용 렌더 스레드 + 링버퍼)
         ├── MU2000Bridge.cpp        # S-MU2000 JNI 브리지 (전용 렌더 스레드 + 링버퍼, 바이트스트림 MIDI)
+        ├── AAudioRecover.h         # 끊긴 AAudio 스트림 자동 복구 (모든 브리지 공용)
         ├── munt/mt32emu/           # munt 코어 소스 (이식됨)
         ├── nuked-sc55/             # Nuked-SC55 코어 소스
         ├── fluidsynth/             # FluidSynth 공식 Android 프리빌트 (include/ + lib/<abi>/)
         ├── gearmulator/            # 88emu(dsp56300/gearmulator) 벤더링 소스
         │   ├── GearmulatorEngine.h/.cpp   # emu88 C API를 감싸는 C++ 어댑터
+        │   ├── Lcd88Renderer.h/.cpp       # 88emu LCD 원시 데이터(DDRAM/CGRAM/도트) → RGBA 비트맵
+        │   ├── lcd88_font.h, lcd88_back.h # HD44780 5x8 폰트, SC-55/88 유리 LCD 배경
         │   └── source/             # 88lib 구동 최소 서브셋 (upstream과 동일한 경로 구조)
         └── smu2000/                # S-MU2000(tarboh/S-MU2000) 벤더링 소스
             ├── MU2000Engine.h/.cpp # mu2000 클래스를 감싸는 C++ 어댑터
+            ├── Lcd2000Renderer.h/.cpp # MU2000 LCD 도트 → RGBA 비트맵 (레벨미터/세그먼트/이름표)
+            ├── lcd_cgrom_fallback.h   # 문자 ROM(hd44780u_b04.bin)이 없을 때 쓰는 내장 폰트
             └── source/             # SH7042+SWP30 구동 최소 서브셋 (upstream과 동일한 경로 구조)
 ```
 
@@ -712,6 +837,11 @@ android-app/
 - [Arduino-AppleMIDI-Library](https://github.com/lathoub/Arduino-AppleMIDI-Library) (ESP32 RTP-MIDI): MIT License
 - [usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android): Apache 2.0
 - ESP32 브리지 펌웨어: [Electric-ray/E-RayDSB](https://github.com/Electric-ray/E-RayDSB)
+- (v1.9) `gearmulator/lcd88_font.h`, `lcd88_back.h`와 `smu2000/lcd_cgrom_fallback.h`는
+  Nuked-SC55 프론트엔드의 LCD 폰트/배경 데이터를 복사한 것이고, `Lcd88Renderer`의 글자
+  배치는 gearmulator `88emuplayer/ui/panel.cpp`(GPL)를, `Lcd2000Renderer`는
+  tarboh/S-MU2000 `src/ui/panel.cpp`(BSD-3-Clause)의 배치를 따릅니다. 배포 전에 위
+  라이선스 조건을 다시 확인하세요.
 - SC-55 / MT-32 / 88emu ROM: 별도 라이선스 (Roland Corp.) — 미포함
 - S-MU2000 ROM: 별도 라이선스 (YAMAHA Corp.) — 미포함
 - SF2 사운드폰트: 각 제작자의 라이선스를 따름 — 미포함

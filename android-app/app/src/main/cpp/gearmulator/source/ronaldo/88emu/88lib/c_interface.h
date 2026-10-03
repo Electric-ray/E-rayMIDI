@@ -222,6 +222,25 @@ EMU88_EXPORT size_t emu88_get_display_text(emu88_context context, unsigned scree
 /* Whether that display is switched on, 1 or 0. */
 EMU88_EXPORT int emu88_is_display_on(emu88_context context, unsigned screen);
 
+/* E-rayMIDI addition: the raw display contents, for a host that draws the panel itself.
+ * type: 0 no display, 1 character display (HD44780 memory: ddram 80 bytes, cgram 64 bytes, to be
+ * mapped onto the glass as the SC-55/SC-88 firmware lays it out), 2 graphic display (a dot grid of
+ * width x height bytes, 0 or 1, row major, in `mono`). Any of the buffers may be NULL. A graphic
+ * grid larger than mono_capacity is reported in width/height but not copied.
+ * Returns 1 when the screen exists, 0 while closed or for an unknown screen. One call copies the
+ * firmware's last published snapshot, so it is cheap enough for ~30 Hz polling, but like every
+ * context function it must be called from the thread that renders. */
+typedef struct
+{
+	int type;
+	int width, height;
+	int display_on, powered;
+	uint16_t leds;
+	uint64_t revision;
+} emu88_display_info;
+EMU88_EXPORT int emu88_get_display_raw(emu88_context context, unsigned screen, emu88_display_info* info,
+                                       uint8_t* ddram, uint8_t* cgram, uint8_t* mono, size_t mono_capacity);
+
 /* == Audio ==
  * `length` counts stereo frames; `stream` takes 2 * length interleaved samples. Rendering a
  * closed synth produces silence. */

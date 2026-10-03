@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "ronaldo/88emu/88lib/c_interface.h"
+#include "Lcd88Renderer.h"
 
 namespace erayMidi {
 
@@ -40,6 +41,12 @@ public:
     std::string getDisplayText(unsigned screen = 0) const;
     bool isDisplayOn(unsigned screen = 0) const;
     uint32_t getPanelLeds() const;
+
+    // 실제 LCD의 원시 내용(Character: DDRAM/CGRAM, Graphic: 도트 그리드). 렌더 스레드에서만 호출할 것
+    // (emu88_context는 스레드 세이프하지 않다). out.look은 호출자가 채운다.
+    bool getDisplayRaw(unsigned screen, Lcd88Raw& out) const;
+    // 이 기종의 LCD가 어떤 모양으로 그려져야 하는지(유리 색/배율).
+    Lcd88Look lcdLook() const;
 
 private:
     emu88_context m_context = nullptr;

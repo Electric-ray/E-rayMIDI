@@ -35,12 +35,20 @@ class MU2000Engine(val ctx: Context) : IEngine {
     external fun nativeInit(programPath: String, waveDir: String, sintabPath: String, lcdFontPath: String): Boolean
     external fun nativeStart()
     external fun nativeStop()
+    external fun nativeRestartAudio()
+    override fun restartAudio() { if (engineRunning) nativeRestartAudio() }
     external fun nativeTerm()
     external fun nativeSendMidi(data: ByteArray, len: Int)
     external fun nativeAllSoundOff()
     external fun nativeIsBootDone(): Boolean
     external fun nativeGetSampleRate(): Int
     external fun nativeGetLastError(): String
+    // 실제 기기 LCD 프레임: (width shl 16) or height, 아직 없으면 0
+    external fun nativeGetLcdSize(): Int
+    // 화면 내용이 바뀔 때마다 증가 (같으면 다시 그릴 필요 없음)
+    external fun nativeGetLcdSeq(): Long
+    // ARGB_8888 비트맵(크기 == nativeGetLcdSize)에 LCD를 합성
+    external fun nativeGetLcdFrame(bitmap: android.graphics.Bitmap): Boolean
 
     private var rtpSession: RtpMidiSession? = null
     private var usbMgr: UsbMidiManager? = null
@@ -67,6 +75,9 @@ class MU2000Engine(val ctx: Context) : IEngine {
         appendLine("3) (선택) sin 테이블 64KB — 없어도 동작함")
         appendLine("   → $ROM_DIR/standin/sin-table.bin")
         appendLine()
+        appendLine("4) (선택) LCD 문자 ROM 4KB hd44780u_b04.bin — 없으면 내장 폰트로 LCD 표시")
+        appendLine("   → $ROM_DIR/hd44780u_b04.bin")
+        appendLine()
         appendLine("※ ROM은 저작권 보호 대상입니다.")
     }
 
@@ -75,8 +86,11 @@ class MU2000Engine(val ctx: Context) : IEngine {
         val program = File(base, "mu2000_flash.bin")
         val waveDir = File(base, "dump")
         val sintab = File(base, "standin/sin-table.bin")
+        // LCD 문자 ROM(4KB). S-MU2000 본가와 같은 위치들을 찾는다. 없으면 네이티브가 내장 폰트를 쓴다.
+        val font = listOf(File(base, "hd44780u_b04.bin"), File(base, "standin/hd44780u_b04.bin"),
+            File(waveDir, "hd44780u_b04.bin")).firstOrNull { it.isFile && it.length() == 0x1000L }
         return Quad(program.absolutePath, waveDir.absolutePath,
-            if (sintab.exists()) sintab.absolutePath else "", "")
+            if (sintab.exists()) sintab.absolutePath else "", font?.absolutePath ?: "")
     }
     private data class Quad(val a: String, val b: String, val c: String, val d: String)
 

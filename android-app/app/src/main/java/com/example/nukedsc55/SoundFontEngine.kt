@@ -33,6 +33,8 @@ class SoundFontEngine(val ctx: Context) : IEngine {
     external fun nativeInit(sf2Path: String): Boolean
     external fun nativeStart()
     external fun nativeStop()
+    external fun nativeRestartAudio()
+    override fun restartAudio() { if (engineRunning) nativeRestartAudio() }
     external fun nativeTerm()
     external fun nativeSendMidi(packed: Int)
     external fun nativeSendSysEx(data: ByteArray, len: Int)

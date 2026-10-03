@@ -24,6 +24,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <aaudio/AAudio.h>
+#include "AAudioRecover.h"
 #include <cstring>
 #include <cstdint>
 #include <mutex>
@@ -94,6 +95,7 @@ static std::atomic<int>      g_logCount{0};
 // ── AAudio ────────────────────────────────────────────────────────────────
 #define SAMPLE_RATE 32000
 static AAudioStream* g_aaStream = nullptr;
+static eray::AAudioRecover g_recover;   // 출력 경로 변경(블루투스 통화 등)으로 끊긴 스트림 자동 복구
 
 #define MIDI_SLICE_FRAMES 160
 
@@ -211,7 +213,8 @@ static aaudio_data_callback_result_t aaCallback(
     return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
-static bool startAAudio() {
+// 스트림 하나를 연다. AAudioRecover가 출력 경로 변경(블루투스 통화 등) 뒤에 같은 방식으로 다시 열 때도 쓴다.
+static aaudio_result_t openMuntStream(AAudioStream** out) {
     // FIX (외부 리뷰 제안): 960프레임(32kHz에서 30ms)은 SC-55의 kFramesBurst=512와 비교해
     // 응답성이 느렸다 — MIDI가 들어와도 콜백이 처리될 때까지 최대 30ms 걸릴 수 있음.
     // 480(15ms)으로 줄임 — 너무 작게 줄이면 콜백 횟수가 늘어 CPU 부담이 커질 수 있어
@@ -220,9 +223,8 @@ static bool startAAudio() {
     constexpr int32_t BUF_FRAMES = CB_FRAMES * 6;
 
     AAudioStreamBuilder* builder = nullptr;
-    if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) {
-        LOGE("builder 생성 실패"); return false;
-    }
+    aaudio_result_t r = AAudio_createStreamBuilder(&builder);
+    if (r != AAUDIO_OK) { LOGE("builder 생성 실패"); return r; }
     AAudioStreamBuilder_setDirection      (builder, AAUDIO_DIRECTION_OUTPUT);
     AAudioStreamBuilder_setSampleRate     (builder, SAMPLE_RATE);
     AAudioStreamBuilder_setChannelCount   (builder, 2);
@@ -235,16 +237,26 @@ static bool startAAudio() {
     // 정상적으로 따라감).
     AAudioStreamBuilder_setSharingMode    (builder, AAUDIO_SHARING_MODE_SHARED);
     AAudioStreamBuilder_setDataCallback   (builder, aaCallback, nullptr);
+    AAudioStreamBuilder_setErrorCallback  (builder, eray::AAudioRecover::onError, &g_recover);
     AAudioStreamBuilder_setFramesPerDataCallback(builder, CB_FRAMES);
     AAudioStreamBuilder_setBufferCapacityInFrames(builder, BUF_FRAMES);
 
-    aaudio_result_t r = AAudioStreamBuilder_openStream(builder, &g_aaStream);
+    r = AAudioStreamBuilder_openStream(builder, out);
     if (r != AAUDIO_OK) {
         LOGE("SHARED 실패(%d), EXCLUSIVE 재시도", r);
         AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_EXCLUSIVE);
-        r = AAudioStreamBuilder_openStream(builder, &g_aaStream);
+        r = AAudioStreamBuilder_openStream(builder, out);
     }
     AAudioStreamBuilder_delete(builder);
+    return r;
+}
+
+static bool startAAudio() {    // FIX (외부 리뷰 제안): 960프레임(32kHz에서 30ms)은 SC-55의 kFramesBurst=512와 비교해
+    // 응답성이 느렸다 — MIDI가 들어와도 콜백이 처리될 때까지 최대 30ms 걸릴 수 있음.
+    // 480(15ms)으로 줄임 — 너무 작게 줄이면 콜백 횟수가 늘어 CPU 부담이 커질 수 있어
+    // 중간값으로 보수적으로 택함.
+    constexpr int32_t CB_FRAMES  = 480;
+    aaudio_result_t r = openMuntStream(&g_aaStream);
     if (r != AAUDIO_OK) { LOGE("스트림 열기 실패: %d", r); return false; }
 
     startSynthThread();  // 렌더링은 스트림 시작 전부터 미리 돌려 링버퍼를 채우기 시작
@@ -261,10 +273,12 @@ static bool startAAudio() {
 
     r = AAudioStream_requestStart(g_aaStream);
     if (r != AAUDIO_OK) { LOGE("start 실패: %d", r); return false; }
+    g_recover.arm(&g_aaStream, [](AAudioStream** o) { return openMuntStream(o); });
     return true;
 }
 
 static void stopAAudio() {
+    g_recover.disarm();   // 감시 스레드를 먼저 멈춘다 (아래에서 스트림을 닫는다)
     stopSynthThread();  // 렌더링 스레드를 먼저 멈추고 오디오 스트림을 닫는다
     if (g_aaStream) {
         AAudioStream_requestStop(g_aaStream);
@@ -332,6 +346,12 @@ Java_com_example_nukedsc55_MuntEngine_nativeInit(
 JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_MuntEngine_nativeStart(JNIEnv*, jobject) {
     // no-op: 오디오 스트림은 nativeInit()에서 이미 시작됨
+}
+
+// 출력 경로가 바뀐 뒤(통화 종료 등) Kotlin에서 "스트림을 다시 열어라" 요청
+JNIEXPORT void JNICALL
+Java_com_example_nukedsc55_MuntEngine_nativeRestartAudio(JNIEnv*, jobject) {
+    if (g_aaStream) g_recover.requestRestart();
 }
 
 JNIEXPORT void JNICALL

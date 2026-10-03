@@ -115,8 +115,16 @@ adb push MT32_PCM.ROM     /sdcard/Download/rom_munt/
 
 adb push MySoundFont.sf2 /sdcard/Download/soundfont/
 
-adb push sxgbin41.tbl  /sdcard/Download/rom_s-yxg50/
+adb push sxgbin41.tbl  /sdcard/Download/rom_s-yxg50/   # (v1.5부터 S-YXG50 엔진은 제거됨 — 예전 빌드용)
 adb push sxgwave4.tbl  /sdcard/Download/rom_s-yxg50/
+
+# 88emu: 기종 ROM (파일명 무관, 내용으로 자동 인식)
+adb push <ROM 파일들> /sdcard/Download/rom_gearmulator/
+
+# S-MU2000: 프로그램 + 웨이브 ROM 4개(파일명 정확히), (선택) LCD 문자 ROM
+adb push mu2000_flash.bin   /sdcard/Download/rom_mu2000/
+adb push xv364a0.ic49 xv365a0.ic50 xw848a0.ic53 xw849a0.ic54 /sdcard/Download/rom_mu2000/dump/
+adb push hd44780u_b04.bin   /sdcard/Download/rom_mu2000/    # 없으면 내장 폰트로 LCD 표시
 ```
 
 정확히 필요한 SC-55 ROM 파일명은 앱을 한 번 실행해서 "ROM 파일 안내" 버튼으로
@@ -254,3 +262,66 @@ SC-55 코어는 66207Hz로 오디오를 생성합니다. AAudio가 이 레이트
 - `FluidBridge.cpp`의 `nativeInit()` 안 `fluid_settings_setnum(..., "synth.gain", ...)`(현재 0.6)
 - `madaha/src/ffi.rs`의 `madaha_init` 안 `GainSink::new(raw_sink, 0.7, true)`
   (게인 0.7 + tanh 소프트클립)
+
+### AAudio 스트림 자동 복구 (v1.9)
+블루투스 통화(A2DP → SCO → A2DP)나 이어폰 탈착처럼 출력 경로가 바뀌면 AAudio가
+스트림을 `AAUDIO_STREAM_STATE_DISCONNECTED`로 만들고 데이터 콜백을 영영 멈춥니다.
+에러 콜백이 없으면 앱은 이를 알 방법이 없어서 "재생 중인데 무음" 상태가 됩니다.
+다섯 엔진 브리지(`SC55Bridge`, `MuntBridge`, `FluidBridge`, `GearmulatorBridge`,
+`MU2000Bridge`)가 공용 헤더 `cpp/AAudioRecover.h`를 씁니다.
+
+- 빌더에 `AAudioStreamBuilder_setErrorCallback(b, AAudioRecover::onError, &recover)`를
+  등록합니다. 콜백 안에서는 스트림을 닫지 않고(교착) 복구 "요청"만 겁니다.
+- 스트림을 start한 직후 `recover.arm(&stream, opener)`를 부르면 감시 스레드가 500ms마다
+  확인해서, 상태가 DISCONNECTED이거나 STARTED인데 2초 넘게 `getFramesRead`가 늘지 않으면
+  (재시작 간격 3초 이상) 스트림을 닫고 **처음 열렸던 레이트 그대로**(엔진 내부
+  레이트/리샘플 설정이 유효하도록) 다시 열어 start 합니다. `opener`는 각 브리지가 같은
+  조건으로 스트림을 여는 함수입니다.
+- `nativeStop`/`nativeTerm`/`stopAAudio`에서는 스트림을 stop/close하기 **전에**
+  `recover.disarm()`을 먼저 부릅니다(감시 스레드를 합류시켜야 안전).
+- Kotlin에서는 `IEngine.restartAudio()`(→ 각 엔진 `nativeRestartAudio()`)로 "지금 한 번 더
+  다시 열기"를 요청할 수 있고, `MidiPlayerPanel`이 오디오 포커스를 되찾을 때 부릅니다.
+
+### LCD 렌더링 — 88emu / S-MU2000 (v1.9)
+두 엔진은 모두 원본 펌웨어를 실행하는 LLE라서 LCD 내용은 펌웨어가 컨트롤러에 써 넣는
+값입니다. 앱은 그 **원시 데이터만** 꺼내서 그립니다.
+
+```
+렌더 스레드(약 33ms마다, 수십~수천 바이트 복사, 뮤텍스)
+     │  내용이 바뀐 경우에만 변경 카운터(seq) 증가
+     ▼
+JNI nativeGetLcdSize / nativeGetLcdSeq / nativeGetLcdFrame(bitmap)   ← Kotlin 백그라운드 스레드
+     │  원시 데이터 → RGBA_8888 픽셀 합성 (Lcd88Renderer / Lcd2000Renderer, 순수 C++)
+     ▼
+LcdFramePump(~30fps, seq가 같으면 생략, 비트맵 3장 순환) → LcdView
+```
+
+- **88emu**: `88lib/c_interface.h`에 추가한 `emu88_get_display_raw()`가 `DisplaySnapshot`
+  (HD44780 DDRAM/CGRAM, 또는 SC-8850·MT-32/CM의 도트 그리드)를 복사합니다. 기종별
+  모양은 `Lcd88Renderer`가 정합니다(`Lcd88Look`: SC-55/88 유리 741×268, SC-8850
+  640×256, MT-32/CM 연두색). `HardwareDevice`의 스냅샷 갱신은 렌더된 시간 기준
+  약 60Hz로 제한해 두었습니다(원래는 렌더 청크마다 할당 포함 갱신).
+- **S-MU2000**: `MU2000Engine::lcdSnapshot()`이 `lcd_render()`의 2행×24칸×8줄 도트를
+  복사합니다. **`lcd_render()`는 에뮬레이션 스레드에서만** 호출해야 하므로 렌더 루프에서
+  샘플 약 1470개(44100Hz/30)마다 부릅니다. HD44780 문자 ROM(CGROM)이 없으면
+  `render()`가 전부 0을 돌려주므로, `hd44780u_b04.bin`이 없을 때는 내장
+  폰트(`lcd_cgrom_fallback.h`)로 CGROM을 채웁니다.
+- 새 기종/엔진에 붙일 때는 같은 3함수 계약(`Size`는 `(w<<16)|h` 또는 0, `Seq`, `Frame`)을
+  구현하고 `LcdFramePump`에 람다로 넘기면 됩니다. 픽셀 포맷은 `ARGB_8888` 비트맵 =
+  RGBA 바이트 순서이며 모든 알파는 0xFF로 씁니다.
+
+### MIDI 파일 플레이어의 상태 전달 (v1.9)
+`MidiFilePlayer.onStateChanged`가 재생/일시정지/정지/자연 종료마다 호출되어
+`MidiPlayerPanel`이 MediaSession 재생 상태를 갱신합니다 — UI 타이머(화면이 꺼지면
+멈춤)에 의존하지 않습니다. 블루투스 재생/일시정지 토글 키는 세션 기록이 아니라
+실제 플레이어 상태로 판단합니다. 마지막으로 재생한 곡은 SharedPreferences(`midi_last_file`)에
+저장되어 플레이어 시작 시 그 곡이 선택됩니다.
+
+### 벤더링 소스 갱신 시 주의 (v1.9)
+- 앱에 들어 있는 gearmulator 88lib는 업스트림 `6ef301a`(2026-09-26), S-MU2000 코어는
+  `7d0fb8a`(2026-09-28) 시점입니다. 우리가 직접 수정한 업스트림 파일은 88lib의
+  `c_interface.h/.cpp`, `hardwareDevice.h/.cpp`뿐이니 88lib를 갱신하면 이 네 파일의 변경을
+  다시 적용해야 합니다.
+- S-MU2000 최신 코어(`b26bfa5`)로 파일을 통째로 교체하면(`swp30.*`, `mu2000.cpp/h`,
+  `dsp/` 이펙트 헤더 71개, 새 `roms_dir.h`) **엔진 연결 시 앱이 종료되는 것이 확인**되어
+  되돌렸습니다. 크래시 로그를 받은 뒤 `swp30` 쪽 → `mu2000.cpp` 순으로 나눠서 적용하세요.

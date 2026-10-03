@@ -243,6 +243,7 @@ add_library(
     SHARED
     GearmulatorBridge.cpp
     ${GEARMULATOR_ROOT}/GearmulatorEngine.cpp
+    ${GEARMULATOR_ROOT}/Lcd88Renderer.cpp
 )
 
 target_include_directories(gearmulator-jni PRIVATE
@@ -257,6 +258,7 @@ target_link_libraries(gearmulator-jni
     88lib
     ${log-lib}
     ${aaudio-lib}
+    ${jnigraphics-lib}
 )
 
 # ---------------------------------------------------------------------------
@@ -274,6 +276,7 @@ add_library(
     SHARED
     MU2000Bridge.cpp
     ${SMU2000_ROOT}/MU2000Engine.cpp
+    ${SMU2000_ROOT}/Lcd2000Renderer.cpp
 )
 
 target_include_directories(mu2000-jni PRIVATE
@@ -286,4 +289,5 @@ target_link_libraries(mu2000-jni
     smu2000_core
     ${log-lib}
     ${aaudio-lib}
+    ${jnigraphics-lib}
 )

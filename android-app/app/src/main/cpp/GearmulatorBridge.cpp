@@ -21,6 +21,9 @@
 #include <jni.h>
 #include <android/log.h>
 #include <aaudio/AAudio.h>
+#include <android/bitmap.h>
+
+#include "AAudioRecover.h"
 
 #include <thread>
 #include <atomic>
@@ -40,6 +43,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 using erayMidi::GearmulatorEngine;
+using erayMidi::Lcd88Raw;
 
 // ---------------------------------------------------------------------------
 // 오디오 링버퍼 (렌더 스레드 → AAudio 콜백, 락프리 — 다른 엔진들과 동일한 구조)
@@ -113,6 +117,7 @@ static void drainMidiQueue(GearmulatorEngine& engine) {
 // ---------------------------------------------------------------------------
 static std::unique_ptr<GearmulatorEngine> s_engine;
 static AAudioStream*     s_stream = nullptr;
+static eray::AAudioRecover s_recover;   // 출력 경로 변경(블루투스 통화 등)으로 끊긴 스트림 자동 복구
 static std::thread       s_renderThread;
 static std::atomic<bool> s_renderThreadRunning{false};
 static std::atomic<bool> s_bootDone{false};
@@ -120,6 +125,38 @@ static std::atomic<bool> s_running{false};
 static bool              s_initialized = false;
 static uint32_t          s_actualRate = 44100; // AAudio가 실제로 내준 레이트
 static constexpr int     kRenderChunk = 256;    // 렌더 스레드가 한 번에 emu88_render_bit16s에 요청하는 프레임 수
+
+// ---------------------------------------------------------------------------
+// LCD 스냅샷. 88lib 컨텍스트는 스레드 세이프하지 않으므로, 원시 LCD 내용(DDRAM/CGRAM 또는
+// 도트 그리드, 수십~수천 바이트)만 렌더 스레드가 ~30Hz로 복사해 두고, 픽셀 합성은
+// JNI(nativeGetLcdFrame, Kotlin 백그라운드 스레드)에서 한다 — 오디오 렌더 스레드에는
+// 비트맵 합성 비용을 얹지 않는다. 내용이 바뀐 경우에만 s_lcdSeq를 올려서 UI가
+// 변경 없는 프레임을 건너뛸 수 있게 한다.
+// ---------------------------------------------------------------------------
+static std::mutex            s_lcdMtx;
+static Lcd88Raw              s_lcdRaw;          // 소비자(JNI)용 최신 스냅샷
+static Lcd88Raw              s_lcdTmp;          // 렌더 스레드 전용 작업 버퍼
+static std::atomic<uint64_t> s_lcdSeq{0};
+static constexpr int         kLcdIntervalMs = 33;
+
+// 렌더 스레드에서만 호출
+static void pollLcd() {
+    Lcd88Raw& tmp = s_lcdTmp;
+    if (!s_engine->getDisplayRaw(0, tmp)) { tmp.type = 0; tmp.monoLen = 0; }
+    tmp.look = s_engine->lcdLook();
+    std::lock_guard<std::mutex> lk(s_lcdMtx);
+    if (!erayMidi::lcd88Equal(tmp, s_lcdRaw)) {
+        s_lcdRaw = tmp;
+        s_lcdSeq.fetch_add(1, std::memory_order_release);
+    }
+}
+
+static void clearLcd() {
+    std::lock_guard<std::mutex> lk(s_lcdMtx);
+    s_lcdRaw.type = 0;
+    s_lcdRaw.monoLen = 0;
+    s_lcdSeq.fetch_add(1, std::memory_order_release);
+}
 
 // AAudio 콜백: 링버퍼에서 pop만 한다. 여기서 emu88_render_bit16s를 직접
 // 부르던 이전 버전이 버벅임의 원인이었을 가능성이 높다 — 노트가 몰릴 때
@@ -148,6 +185,7 @@ static aaudio_result_t openStream(AAudioStream** stream, aaudio_sharing_mode_t m
     AAudioStreamBuilder_setSharingMode(builder, mode);
     AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
     AAudioStreamBuilder_setDataCallback(builder, audioCallback, nullptr);
+    AAudioStreamBuilder_setErrorCallback(builder, eray::AAudioRecover::onError, &s_recover);
     aaudio_result_t res = AAudioStreamBuilder_openStream(builder, stream);
     AAudioStreamBuilder_delete(builder);
     return res;
@@ -173,6 +211,7 @@ static void renderLoop(uint32_t desiredRate) {
 
     std::vector<int16_t> buf(kRenderChunk * 2);
     constexpr int kHighWater = (RING_FRAMES * 3) / 4;
+    auto lastLcdPoll = std::chrono::steady_clock::now() - std::chrono::milliseconds(kLcdIntervalMs);
 
     while (s_renderThreadRunning.load(std::memory_order_relaxed)) {
         // 링버퍼가 이미 충분히 차 있으면 잠깐 쉰다 (AAudio 콜백이 소비하는
@@ -183,6 +222,12 @@ static void renderLoop(uint32_t desiredRate) {
         drainMidiQueue(*s_engine);
         s_engine->renderInt16(buf.data(), kRenderChunk);
         ring_push_block(buf.data(), kRenderChunk);
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastLcdPoll >= std::chrono::milliseconds(kLcdIntervalMs)) {
+            lastLcdPoll = now;
+            pollLcd();
+        }
     }
 }
 
@@ -247,13 +292,24 @@ Java_com_example_nukedsc55_GearmulatorEngine_nativeStart(JNIEnv*, jobject)
     s_renderThreadRunning = true;
     s_renderThread = std::thread(renderLoop, s_actualRate);
     AAudioStream_requestStart(s_stream);
+    s_recover.arm(&s_stream, [](AAudioStream** o) {
+        return openStream(o, AAUDIO_SHARING_MODE_SHARED, (int32_t)s_actualRate);   // 같은 레이트로 (피치 유지)
+    });
     LOGI("nativeStart: AAudio @ %u Hz, 렌더 스레드 시작", s_actualRate);
+}
+
+// 출력 경로가 바뀐 뒤(통화 종료 등) Kotlin에서 "스트림을 다시 열어라" 요청
+JNIEXPORT void JNICALL
+Java_com_example_nukedsc55_GearmulatorEngine_nativeRestartAudio(JNIEnv*, jobject)
+{
+    if (s_running.load()) s_recover.requestRestart();
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_GearmulatorEngine_nativeStop(JNIEnv*, jobject)
 {
     if (!s_running.load()) return;
+    s_recover.disarm();
     s_running = false;
     s_renderThreadRunning = false;
     if (s_stream) AAudioStream_requestStop(s_stream);
@@ -264,6 +320,7 @@ JNIEXPORT void JNICALL
 Java_com_example_nukedsc55_GearmulatorEngine_nativeTerm(JNIEnv*, jobject)
 {
     if (!s_initialized) return;
+    s_recover.disarm();
     if (s_running.load()) {
         s_running = false;
         s_renderThreadRunning = false;
@@ -275,6 +332,7 @@ Java_com_example_nukedsc55_GearmulatorEngine_nativeTerm(JNIEnv*, jobject)
     s_engine.reset();
     { std::lock_guard<std::mutex> lk(g_evMtx); g_evQ.clear(); }
     ring_reset();
+    clearLcd();
     s_initialized = false;
     s_bootDone.store(false);
     LOGI("nativeTerm");
@@ -423,6 +481,60 @@ Java_com_example_nukedsc55_GearmulatorEngine_nativeGetPanelLeds(JNIEnv*, jobject
 {
     if (!s_initialized || !s_engine || !s_bootDone.load()) return 0;
     return (jint)s_engine->getPanelLeds();
+}
+
+// ---------------------------------------------------------------------------
+// 실제 기기 LCD 프레임 (SC-55/SC-88: 741x268 주황 유리 / SC-8850: 640x256 / MT-32·CM: 연두색 도트).
+//   nativeGetLcdSize : (width << 16) | height, 이 기종에 LCD가 없으면 0
+//   nativeGetLcdSeq  : 화면 내용이 바뀔 때마다 증가 — 같으면 그리지 않아도 된다
+//   nativeGetLcdFrame: RGBA_8888 비트맵(크기가 nativeGetLcdSize와 정확히 같아야 함)에 합성
+// 모두 s_lcdMtx로 보호된 복사본만 읽으므로 어느 스레드에서 불러도 안전하다.
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_com_example_nukedsc55_GearmulatorEngine_nativeGetLcdSize(JNIEnv*, jobject)
+{
+    int w = 0, h = 0;
+    std::lock_guard<std::mutex> lk(s_lcdMtx);
+    if (!erayMidi::lcd88FrameSize(s_lcdRaw, &w, &h)) return 0;
+    return (jint)((w << 16) | h);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_example_nukedsc55_GearmulatorEngine_nativeGetLcdSeq(JNIEnv*, jobject)
+{
+    return (jlong)s_lcdSeq.load(std::memory_order_acquire);
+}
+
+static std::mutex            s_frameMtx;        // nativeGetLcdFrame 호출 직렬화(작업 버퍼 공유)
+static Lcd88Raw              s_frameCopy;
+static std::vector<uint32_t> s_frameScratch;
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_nukedsc55_GearmulatorEngine_nativeGetLcdFrame(JNIEnv* env, jobject, jobject bitmap)
+{
+    std::lock_guard<std::mutex> fl(s_frameMtx);
+    {
+        std::lock_guard<std::mutex> lk(s_lcdMtx);
+        s_frameCopy = s_lcdRaw;
+    }
+    int w = 0, h = 0;
+    if (!erayMidi::lcd88FrameSize(s_frameCopy, &w, &h)) return JNI_FALSE;
+
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) < 0) return JNI_FALSE;
+    if (info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) return JNI_FALSE;
+    if ((int)info.width != w || (int)info.height != h) return JNI_FALSE;
+
+    s_frameScratch.resize((size_t)w * (size_t)h);
+    erayMidi::lcd88Render(s_frameCopy, s_frameScratch.data());
+
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) < 0) return JNI_FALSE;
+    auto* dst = static_cast<uint8_t*>(pixels);
+    for (int y = 0; y < h; ++y)
+        memcpy(dst + (size_t)y * info.stride, &s_frameScratch[(size_t)y * w], (size_t)w * sizeof(uint32_t));
+    AndroidBitmap_unlockPixels(env, bitmap);
+    return JNI_TRUE;
 }
 
 } // extern "C"

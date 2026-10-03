@@ -69,6 +69,8 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
     external fun nativeInit(romDir: String, deviceCliId: String): Boolean
     external fun nativeStart()
     external fun nativeStop()
+    external fun nativeRestartAudio()
+    override fun restartAudio() { if (engineRunning) nativeRestartAudio() }
     external fun nativeTerm()
     external fun nativeSendMidi(packed: Int)
     external fun nativeSendSysEx(data: ByteArray, len: Int)
@@ -85,6 +87,12 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
     external fun nativeGetDisplayText(screen: Int): String
     external fun nativeIsDisplayOn(screen: Int): Boolean
     external fun nativeGetPanelLeds(): Int
+    // 실제 기기 LCD 프레임: (width shl 16) or height, LCD 없는 기종/미연결이면 0
+    external fun nativeGetLcdSize(): Int
+    // 화면 내용이 바뀔 때마다 증가하는 카운터 (같으면 다시 그릴 필요 없음)
+    external fun nativeGetLcdSeq(): Long
+    // ARGB_8888 비트맵(크기 == nativeGetLcdSize)에 LCD를 합성
+    external fun nativeGetLcdFrame(bitmap: android.graphics.Bitmap): Boolean
 
     private var rtpSession: RtpMidiSession? = null
     private var usbMgr: UsbMidiManager? = null
@@ -273,6 +281,9 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
         if (!engineRunning) return ""
         return nativeGetDisplayText(0)
     }
+
+    /** 이 기종이 비트맵으로 그릴 수 있는 실제 LCD를 가졌는지 (SC-55/88, SC-8850, MT-32/CM). */
+    fun hasGraphicLcd(): Boolean = engineRunning && nativeGetLcdSize() != 0
 
     fun hasTextDisplay(): Boolean = engineRunning && nativeIsDisplayOn(0) && nativeGetDisplayText(0).isNotBlank()
 
