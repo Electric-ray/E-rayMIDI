@@ -1976,6 +1976,17 @@ inline int drum_cents(const u8 *rec, int coarse = 64, int fine = 64, bool xg = t
 	return semi * 100 + (int(rec[1]) - 64) + (fine - 64);
 }
 
+// **パートの DETUNE（08 pp 09・0A）をセントに**（6.240、issue #3）。
+// 実機（`0x1283FA`）は (上 << 8) + (下 << 4) - 0x800 を、XG では A4（440Hz）の
+// 1Hz あたりのセント（表 `0x1E5958` の 69 番 = 0x63A、負は `0x1E5A58` の 0x659）に掛けて
+// 16 ビット下げる（負は床へ）。XG でないときは鍵ごとの表を引くが、native は XG だけ
+inline int detune_cents(int hi, int lo)
+{
+	const int d = (hi << 8) + (lo << 4) - 0x800;
+	const int m = d * (d >= 0 ? 0x63a : 0x659);
+	return m >= 0 ? m >> 16 : -((-m + 0xffff) >> 16);
+}
+
 inline u16 drum_pitch_reg(const u8 *rom, const u8 *rec, int cents)
 {
 	int c = cents < 0 ? -cents : cents;
@@ -2023,7 +2034,8 @@ inline int drum_cut_idx(const u8 *rec, int cut) { return drum_rec_idx(rec, 11, c
 inline slot_regs drum_note(const u8 *rom, const u8 *rec, int att,
                            const defaults &d = defaults(),
                            int coarse = 64, int fine = 64, int atk = 64,
-                           int cut = 64, int reso = 64, int dec1 = 64, int dec2 = 64)
+                           int cut = 64, int reso = 64, int dec1 = 64, int dec2 = 64,
+                           int cents_extra = 0)
 {
 	slot_regs r;
 	if (!rom || !rec)
@@ -2053,7 +2065,7 @@ inline slot_regs drum_note(const u8 *rom, const u8 *rec, int att,
 	r.set(0x0a, 0x7000);
 	r.set(0x0b, 0x0000);
 	r.set(0x10, 0x0000);
-	r.set(0x11, drum_pitch_reg(rom, rec, drum_cents(rec, coarse, fine)));
+	r.set(0x11, drum_pitch_reg(rom, rec, drum_cents(rec, coarse, fine) + cents_extra));
 	const wave_info w = read_wave(rec + 26);
 	{
 		// 逆向きのサンプルは 2 つの数を入れ替える（6.233）。

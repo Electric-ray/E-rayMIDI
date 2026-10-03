@@ -41,7 +41,7 @@ public:
 	// S-MU2000: エフェクトを C++ で鳴らす軽量モード（doc/native-dsp.md）。nullptr で切。
 	// full なら MEG そのものを回さず、乾いた音も C++ 側で混ぜる（そのぶん軽い）
 	void set_native_fx(smu2000::dsp::native_fx *fx, bool full = false, int mask = 15)
-	{ m_native = fx; m_native_full = full; m_native_mask = mask; }
+	{ m_native = fx; m_native_full = full; m_native_mask = mask; m_mfx_seen = ~0u; }
 
 	// S-MU2000: address_map の代わり。レジスタは 64ch x 64 スロットの格子
 	u16  read16(offs_t addr);
@@ -75,6 +75,21 @@ public:
 		m_rand_seed = 1664525 * m_rand_seed + 1013904223;
 		// 下位ビットは周期が短くよく使われるので 16bit 回転して返す
 		return (m_rand_seed >> 16) | (m_rand_seed << 16);
+	}
+	// rand() を n 回呼んだのと同じだけ種を進める掛け数と足し数（seed = mul * seed + add）
+	static constexpr void rand_jump(u32 n, u32 &mul, u32 &add)
+	{
+		mul = 1; add = 0;
+		for(u32 i = 0; i != n; i++) {
+			add = 1664525 * add + 1013904223;
+			mul = 1664525 * mul;
+		}
+	}
+	void rand_skip(u32 n)
+	{
+		u32 mul, add;
+		rand_jump(n, mul, add);
+		m_rand_seed = mul * m_rand_seed + add;
 	}
 	void set_rand_seed(u32 seed) { m_rand_seed_base = seed; m_rand_seed = seed; }
 
@@ -372,6 +387,7 @@ private:
 			u8  jump;                 // bit 0x3f: 条件つきで先へ飛ぶ（ALU もレジスタも使わない）
 			u8  cond;                 // bit 0x18-0x1f
 			u16 target;               // 飛び先の番地
+			u16 rand_n;               // 飛ばした区画の命令: 乱数をこの回数ぶん進める（ほかの区画のディザの並びを崩さない）
 		};
 		void build_ops(op *ops) const;
 		void run_program(const op *ops);
@@ -529,6 +545,35 @@ private:
 	// S-MU2000: 判定を済ませた命令表。保存しないので、読み戻したら作り直す
 	std::array<meg_state::op, 0x180> m_meg_ops = {};
 	bool m_meg_ops_stale = true;
+	// S-MU2000: **静まった区画を回さない**（doc/native-engine.md の 6.237）。MEG のプログラムは
+	// 地図（m_map）で区画に分かれていて、区画どうしはミキサを通してしかやり取りしない。
+	// 入口（m20-m2f のうちその区画が読むもの）と出口（その区画が書く m20-m3f）が区画の窓の長さ
+	// より長く 0 のままなら、その区画の命令を空にして回す（命令表の中で何もしない命令に替える）。
+	// 入口に音が来たら、そのサンプルから元に戻す。空にした命令も乱数の種は同じだけ進めるので、
+	// 回している区画はビット単位で同じ。SMU2000_MEG_SKIP=0 で使わない。状態の保存に入れる（6.237）
+	struct meg_region {
+		u32 in_mask = 0;          // 入口（m20-m2f。ビット = 番号 - 0x20）
+		u64 out_mask = 0;         // 出口（m00-m3f のうち 0x20 から上）
+		u32 hold = 0;             // 静まってから空にするまでのサンプル数（区画の窓の長さ + 余裕）
+		u32 quiet = 0;            // 入口と出口が 0 のまま続いたサンプル数
+		bool used = false;
+	};
+	std::array<meg_region, 8> m_meg_regions = {};
+	u32  m_meg_skip_mask = 0;     // 空にしている区画（ビット = 区画の番号）
+	bool m_meg_skip_on = true;
+	bool m_meg_skip_debug = false;   // SMU2000_MEG_SKIP_DEBUG で、区画と空にしたり戻したりを出す
+	void meg_regions_rebuild(bool keep_quiet);
+	// プログラムの書き換えは、書き換わった命令の区画だけ戻す（地図が変わったら全部）
+	std::array<u64, 6> m_meg_prg_dirty = {};   // 中身が変わった命令（ビット = 番地）
+	bool m_meg_map_dirty = true;               // 地図が変わった（区画の境目が動くので全部戻す）
+	// 全部の区画が空で、空の 1 サンプルを回し終えたら、MEG の状態はそれ以上動かない
+	// （遅れの輪も p も同じ値に戻る）。それからは乱数の種を進めるだけにする
+	bool m_meg_idle_all = false;
+	bool m_meg_idle_primed = false;
+	u32  m_meg_idle_rand = 0;                  // 1 サンプルで引く乱数の数（空の命令のぶんの合計）
+	void meg_ops_rebuild();       // 命令表を作り直し、空にしている区画を何もしない命令に替える
+	void meg_skip_before();       // ミキサのあと、MEG を回す前（入口に音が来た区画を戻す）
+	void meg_skip_after();        // MEG を回したあと（静まった区画を数える）
 	// S-MU2000: MEG の分岐の状態（doc/upstream.md の 11）。飛び越しは 1 サンプルの中で終わり、
 	// 覚えた符号も次の比較で上書きされるので、状態の保存には入れない
 	bool m_meg_flag_n = false, m_meg_flag_z = false;
@@ -554,6 +599,16 @@ private:
 	// S-MU2000: MEG の定数の値が変わるたびに 1 増える（JIT の定数を焼き込んだ版を捨てる印）。
 	// 状態の保存には入れない（meg_state の並びを変えると、前の版で保存した状態が読めなくなる）
 	u32 m_meg_const_gen = 0;
+	// S-MU2000: 軽量モードの口を MEG と同じ作りの C++（dsp/meg_fx.h）で鳴らすための控え。
+	// プログラムが変わるたびに m_mfx_gen を進め、軽量モードの側で形を見分け直す
+	u32  m_mfx_gen = 0, m_mfx_seen = ~0u;
+	u32  m_mfx_cfg_gen[4] = {};   // 係数と番地を読んだときの書き換えの回数（違えば読み直す）
+	u32  m_mfx_quiet[4] = {};     // 送りも戻りも 0 のまま続いたサンプル数
+	u32  m_mfx_hold[4] = {};      // これだけ静かなら回さない（遅延の窓 + 0.1 秒）
+	u32  m_meg_off_gen = 0;       // 番地表の書き換えの回数
+	s32  m_mfx_out[4][8] = {};    // 戻り（MEG のレジスタと同じ目盛り）
+	int  m_mfx_reg[4][8] = {};    // 戻りを書くレジスタ（m の番号）
+	int  m_mfx_nout[4] = {};      // 戻りの数（0 なら MEG と同じ作りでは鳴らしていない）
 	// S-MU2000: 分岐のあるプログラムを JIT で回すときの「この命令の手前まで飛ばす」位置（0 なら飛ばさない）。
 	// 1 サンプルの中だけで使う。保存しない
 	u32 m_meg_jit_skip = 0;
@@ -571,6 +626,9 @@ private:
 	u16 m_wave_access = 0, m_revram_enable = 0;
 
 	u64 m_keyon_mask = 0;
+	// S-MU2000: 鳴っておらず、ピッチ EG も着いている声（awm2_step が回さない）。その声に何か書かれたら
+	// （write16）・キーオンしたら外す。リセットと状態の読み戻しで全部外す（保存しない）
+	u64 m_awm_idle = 0;
 	u16 m_internal_adr = 0;
 
 	// Streaming block trampolines

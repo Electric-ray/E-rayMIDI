@@ -930,6 +930,7 @@ public:
 		case 0x0e: p.pan = dd; break;
 		case 0x12: p.cho = dd; break;
 		case 0x13: p.rev = dd; break;
+		case 0x14: p.var = dd; break;          // Var Send（SysEx で書いたとき）
 		case 0x18: p.bri = dd; break;
 		case 0x15: p.vrate = dd; break;
 		case 0x16: p.vdep = dd; break;
@@ -1290,7 +1291,26 @@ public:
 		const u8 *b = m_ram + ram::part_base(part);
 		const int fine = int(s16(u16(u16(b[ram::PART_FINE]) << 8 | b[ram::PART_FINE + 1])));
 		// マスターチューン（全部のパートに効く）も一緒に足す
-		return fine * 100 / 8192 + master_tune_tenths() / 10;
+		return fine * 100 / 8192 + master_tune_tenths() / 10 + part_detune_cents(part);
+	}
+
+	// **パートの DETUNE**（08 pp 09・0A。6.240、issue #3）。旋律もドラムも同じセントを足す
+	int part_detune_cents(int part) const
+	{
+		if (!m_ram || part < 0 || part >= PARTS)
+			return 0;
+		const u8 *b = m_ram + ram::part_base(part);
+		return nv::detune_cents(int(b[0x09]), int(b[0x0a]));
+	}
+
+	// **ドラムのパートのノートシフト**（6.240）。旋律は鍵を移すが、ドラムは打を
+	// 選び直さず、半音 × 100 セントを音程に足す（実機 `0x128374`。マスター移調は入らない）
+	int drum_shift_cents(int part) const
+	{
+		if (!m_ram || part < 0 || part >= PARTS)
+			return 0;
+		const u8 *b = m_ram + ram::part_base(part);
+		return (int(b[0x08]) - 64 + int(s8(b[ram::PART_COARSE]))) * 100 + part_detune_cents(part);
 	}
 
 	int part_shift(int part) const
@@ -1704,9 +1724,11 @@ private:
 				          : exact_send(s, part, true, s.base34))
 				       : send_reg(*s.cal, 0x34, true, m_cc[part].cho, s.cal->cal_cho,
 				                  s.rnd_drop, s.base34));
+			// **包絡線の刻みと同じ `cut_with_cc` で書く**（issue #3）。`cutoff_reg` を直に
+			// 呼んでいて、式の道（cut_exact）と CC71・割り当ての足し分が抜け、つまみが
+			// 動くたびに切る高さが一瞬だけ別の値（PHAZE1 で 16e3 → 13ff）に飛んでプチ音になった
 			if (s.cut)
-				m_poke(u32(i) * 64 + 0x00,
-				       cutoff_reg(s.cut, *s.cal, part, s.elem, s.keynote));
+				m_poke(u32(i) * 64 + 0x00, cut_with_cc(s, s.cut));
 			if (s.cal->has(0x04))
 				m_poke(u32(i) * 64 + 0x04,
 				       s.cal->synth && s.elem
@@ -2632,8 +2654,38 @@ private:
 		// ここを下位で書いていたので、コーラスを使う曲で送りが丸ごと狂っていた
 		const int v = nv::send_level_att(m_rom, now < 0 ? (cho ? 0 : 40) : now,
 		                                 extra, pan);
-		return cho ? u16(u16(v) << 8 | (base & 0x00ff))
-		           : u16((base & 0xff00) | u16(v));
+		if (!cho)
+			return u16((base & 0xff00) | u16(v));
+		// **バリエーション（システム接続）への送りは 0x34 の下位**（issue #3。Children.mid の
+		// ピアノのディレイ）。CC94 = 30 / 60 / 127 で firmware は 31 / 21 / 10 を書いた
+		// （リバーブ・コーラスと同じ送りの表）。ここを 0xFF のままにしていたので、
+		// native の口ではバリエーションに何も送っていなかった
+		return u16(u16(v) << 8 | u16(var_send_att(s, part, base)));
+	}
+
+	// 0x34 の下位（バリエーションへの送り）。システム接続のときだけ組む。
+	// インサーション接続のパート（ins_mixer）と、ほかの接続のときは base のまま
+	u8 var_send_att(const slot_use &s, int part, u16 base) const
+	{
+		if (!m_ram || m_ram[ram::VAR_BLOCK + ram::VAR_CONNECT] != 1)
+			return u8(base & 0xff);
+		const int now = m_cc[part].var < 0 ? 0 : m_cc[part].var;
+		int pan = 64;
+		if (s.elem && !s.sfx) {
+			pan = nv::voice_pan_pos(m_rom, s.elem, s.note);
+		} else {
+			// **ドラムの打（SFX の打も）は掛け算が >> 7 で、パンの目減りが無い**。CC94 を 8-120 と
+			// 振って、鍵 36・38・42（42 はパンが寄っている）と SFXKit1 の鍵 36 で firmware は同じ値だった。
+			// リバーブ・コーラスの送り（/ 127 とパンの目減り）とは違う式
+			const int d = drum_setup_of(part, s.keynote, 0x07);
+			const int ds = d < 0 ? 127 : d;
+			const int eff = (now * ds) >> 7;
+			const int v = 16 + nv::send_att(m_rom, eff);
+			return u8(v > 255 ? 255 : v);
+		}
+		if (s.rnd_pan >= 0)
+			pan = 0;
+		return u8(nv::send_level_att(m_rom, now, 127, pan));
 	}
 
 	u16 pan_reg(const nv::voice_cal &c, int part, int rnd, u16 base) const
@@ -3575,7 +3627,8 @@ public:
 				                   drum_live(part, note, 0x0b),
 				                   drum_live(part, note, 0x0c),
 				                   drum_live(part, note, 0x0e),
-				                   drum_live(part, note, 0x0f));
+				                   drum_live(part, note, 0x0f),
+				                   drum_shift_cents(part));
 				// **`0x10` のビット 14 は、直前に鳴らした旋律の音の
 				// 印を拾う**（6.179）。実機は旋律の段で `0x43E96E` に
 				// byte10 の印を置くが、ドラムの段はそこを書き直さず

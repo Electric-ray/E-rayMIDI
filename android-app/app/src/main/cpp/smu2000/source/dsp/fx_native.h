@@ -17,6 +17,7 @@
 #include "blocks.h"
 #include "blocks2.h"
 #include "reverb.h"
+#include "meg_fx.h"
 #include "xg/fx_params.h"
 
 #include <cstdio>
@@ -646,9 +647,13 @@ public:
 		m_slot[id].set_insertion(id >= INS1);
 		m_slot[id].set(type, raw, count);
 	}
-	void reset() { for (auto &s : m_slot) s.reset(); }
+	void reset() { for (auto &s : m_slot) s.reset(); for (auto &s : m_mfx) s.reset(); }
 
 	fx_slot &slot(slot_id id) { return m_slot[id]; }
+
+	// MEG と同じ作りのエフェクト（リバーブ・コーラス・バリエーション・インサーション 1 の口ごと）。
+	// firmware が置いたプログラムの形を知っていれば、その口はこちらで鳴らす
+	meg_fx_slot &mfx(slot_id id) { return m_mfx[id]; }
 
 	void process(slot_id id, float l, float r, float &ol, float &orr)
 	{
@@ -669,6 +674,7 @@ public:
 private:
 	fx_slot   m_slot[SLOTS];
 	master_eq m_meq;
+	meg_fx_slot m_mfx[INS1 + 1];
 	// 送りに対する戻りの量。インサーションは、送りの目盛りが乾いた音と違うので実測で合わせた
 	// （THRU を掛けて、MEG のときと同じ大きさになる値。doc/native-dsp.md）
 	float   m_return[SLOTS] = { 0.6f, 0.6f, 0.6f, 0.31f, 0.31f, 0.31f, 0.31f };

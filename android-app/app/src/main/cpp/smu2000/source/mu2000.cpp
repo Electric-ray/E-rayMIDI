@@ -4,6 +4,7 @@
 
 #include "mu2000.h"
 #include "lcdfont.h"
+#include "roms_dir.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
 #include <xmmintrin.h>
@@ -375,12 +376,21 @@ void mu2000::slave_loop(u64 seen)
 
 bool mu2000::load_program(const std::string &path)
 {
-	auto rom = std::make_shared<std::vector<u8>>();
-	if (!read_file(path, *rom, 0x400000)) {
+	std::vector<u8> raw;
+	if (!read_file(path, raw, 0x400000)) {
 		m_error = "プログラム ROM を読めない（4MB でないか、見つからない）: " + path;
 		return false;
 	}
-	set_program_rom(std::move(rom));
+	return load_program_data(raw.data(), raw.size());
+}
+
+bool mu2000::load_program_data(const u8 *data, size_t size)
+{
+	if (!data || size != 0x400000) {
+		m_error = "プログラム ROM の大きさが 4MB でない";
+		return false;
+	}
+	set_program_rom(std::make_shared<std::vector<u8>>(data, data + size));
 	return true;
 }
 
@@ -411,30 +421,45 @@ void mu2000::set_sintab_rom(u16rom p)
 }
 
 
+const char *const mu2000::WAVE_ROM_NAMES[4] = {
+	smu2000::kWaveRomNames[0], smu2000::kWaveRomNames[1],
+	smu2000::kWaveRomNames[2], smu2000::kWaveRomNames[3]
+};
+
 bool mu2000::load_wave(const std::string &dir)
+{
+	std::vector<u8> parts[4];
+	for (int i = 0; i < 4; i++) {
+		const std::string path = dir + "/" + WAVE_ROM_NAMES[i];
+		if (!read_file(path, parts[i], 0x800000)) {
+			m_error = "波形 ROM を読めない（8MB でないか、見つからない）: " + path;
+			return false;
+		}
+	}
+	const u8 *const data[4] = { parts[0].data(), parts[1].data(), parts[2].data(), parts[3].data() };
+	const size_t size[4] = { parts[0].size(), parts[1].size(), parts[2].size(), parts[3].size() };
+	return load_wave_data(data, size);
+}
+
+bool mu2000::load_wave_data(const u8 *const part[4], const size_t size[4])
 {
 	// MAME は 4 つの 8MB を 32bit 語に交互に置いている。
 	//   ic49 -> 語の下位 16bit（0x0000000 から）
 	//   ic50 -> 語の上位 16bit
 	//   ic53 / ic54 -> 0x1000000 語目から同じ形で
-	static const char *names[4] = {
-		"xv364a0.ic49", "xv365a0.ic50", "xw848a0.ic53", "xw849a0.ic54"
-	};
-
-	auto rom = std::make_shared<std::vector<u8>>(0x2000000, 0);   // 32MB
-	for (int i = 0; i < 4; i++) {
-		std::vector<u8> part;
-		const std::string path = dir + "/" + names[i];
-		if (!read_file(path, part, 0x800000)) {
-			m_error = "波形 ROM を読めない（8MB でないか、見つからない）: " + path;
+	for (int i = 0; i < 4; i++)
+		if (!part[i] || size[i] != 0x800000) {
+			m_error = std::string("波形 ROM の大きさが 8MB でない: ") + WAVE_ROM_NAMES[i];
 			return false;
 		}
+	auto rom = std::make_shared<std::vector<u8>>(0x2000000, 0);   // 32MB
+	for (int i = 0; i < 4; i++) {
 		const size_t base = (i >= 2) ? 0x1000000 : 0;
 		const size_t off  = (i & 1) ? 2 : 0;
-		for (size_t j = 0; j < part.size(); j += 2) {
+		for (size_t j = 0; j < size[i]; j += 2) {
 			const size_t dst = base + j * 2 + off;
-			(*rom)[dst + 0] = part[j + 0];
-			(*rom)[dst + 1] = part[j + 1];
+			(*rom)[dst + 0] = part[i][j + 0];
+			(*rom)[dst + 1] = part[i][j + 1];
 		}
 	}
 
@@ -450,9 +475,18 @@ bool mu2000::load_sintab(const std::string &path)
 		m_error = "sin 表を読めない（64KB でないか、見つからない）: " + path;
 		return false;
 	}
-	auto rom = std::make_shared<std::vector<u16>>(raw.size() / 2);
+	return load_sintab_data(raw.data(), raw.size());
+}
+
+bool mu2000::load_sintab_data(const u8 *data, size_t size)
+{
+	if (!data || size != 0x10000) {
+		m_error = "sin 表の大きさが 64KB でない";
+		return false;
+	}
+	auto rom = std::make_shared<std::vector<u16>>(size / 2);
 	for (size_t i = 0; i < rom->size(); i++)
-		(*rom)[i] = u16(raw[i * 2] | (raw[i * 2 + 1] << 8));
+		(*rom)[i] = u16(data[i * 2] | (data[i * 2 + 1] << 8));
 	// 表は 1/4 周期を 0x8000（中心）から 0xffff（山）まで持つ形。MEG は後ろ半周期を ^0xffff で作るので、
 	// 0 から始まる表だと山と谷の境目で値が 0 と 0xffff の間を跳び、深いコーラス（CELESTE・SYMPHONIC・CHORUS 3）に
 	// 雑音が乗っていた。前の make_standins.py が作った 0 始まりの代替品は、ここで中心から始まる形に作り直す
@@ -3071,6 +3105,16 @@ int ins_wide(const std::vector<u8> &ram, int n, int addr)
 	return ram[off] << 8 | ram[off + 1];
 }
 
+// バリエーションのパラメータ 1-10（02 01 42-55）。塊の +0x02 から 16bit の数が 10 個並ぶ
+// （xg::ram::VAR_WIDE）。7bit ずつの番地の表（locate）には無いので、xg_read では読めない
+int var_wide(const std::vector<u8> &ram, int index)
+{
+	const u32 off = xg::ram::VAR_BLOCK + xg::ram::VAR_WIDE + u32(index) * 2;
+	if (off + 1 >= ram.size())
+		return -1;
+	return ram[off] << 8 | ram[off + 1];
+}
+
 } // namespace
 
 // RAM に入っている XG の設定を読んで、C++ のエフェクトに渡す。
@@ -3099,8 +3143,11 @@ void mu2000::native_fx_update()
 			return p.addr >= 0x30 ? ins_wide(ram, s.ins, p.addr)
 			                      : xg_read(ram, s.hi, s.mid, s.base + p.addr, p.size);
 		if (s.id == nfx::VARIATION) {
+			// **1-10 は RAM に 16bit の数で並ぶ**（issue #3）。xg_read で 02 01 42 を引いていたが、
+			// その番地は RAM の表に無いので -1 になり、どのパラメータも下限（ディレイ 0.1ms など）で
+			// 鳴っていた。Children.mid のピアノのディレイが native fx で消えていた
 			if (p.addr >= 0x30 || index < 10)
-				return xg_read(ram, s.hi, s.mid, 0x42 + 2 * index, 2);
+				return var_wide(ram, index);
 			return xg_read(ram, s.hi, s.mid, 0x70 + (p.addr - 0x20), 1);
 		}
 		if (p.addr >= 0x20)
@@ -3468,7 +3515,7 @@ namespace {
 
 // 保存の形。中身の並びを変えたら上げる
 constexpr u32 STATE_MAGIC   = 0x554d3253;   // "S2MU"
-constexpr u32 STATE_VERSION = 13;  // 13: d80000（LCD のコントラスト） / 2: MIDI の入口が A/B の 2 口になった / 3: SWP30 のピッチ EG / 4: サンプリングの録音の位置 / 5: SmartMedia の命令の途中 / 6: MEG の印と 2 つ目の idx / 7: USB の口（C・D）の受け取り途中 / 8: 2 つ目の A/D 変換器（AN4 = HOST SELECT） / 9: SWP30 の書き込みの待ち / 10: USB のコマンド（M37640 からの知らせ） / 11: 液晶の「native の持ち物」（6.188） / 12: 外字の「native の持ち物」（6.190）
+constexpr u32 STATE_VERSION = 15;  // 15: MEG の書き換わった命令（6.238） / 14: MEG の静まった区画（6.237） / 13: d80000（LCD のコントラスト） / 2: MIDI の入口が A/B の 2 口になった / 3: SWP30 のピッチ EG / 4: サンプリングの録音の位置 / 5: SmartMedia の命令の途中 / 6: MEG の印と 2 つ目の idx / 7: USB の口（C・D）の受け取り途中 / 8: 2 つ目の A/D 変換器（AN4 = HOST SELECT） / 9: SWP30 の書き込みの待ち / 10: USB のコマンド（M37640 からの知らせ） / 11: 液晶の「native の持ち物」（6.188） / 12: 外字の「native の持ち物」（6.190）
 constexpr u32 STATE_VERSION_OLDEST = 2;
 
 } // namespace

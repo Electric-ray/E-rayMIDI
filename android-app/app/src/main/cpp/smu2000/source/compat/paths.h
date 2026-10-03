@@ -117,6 +117,12 @@ inline std::string config_dir()
 		return {};
 	return std::string(home) + "/.local/share/S-MU2000/";
 #else
+	// Inside a sandboxed AUv3 this is the one place the extension can reach
+	// outside its own bundle: macOS points $HOME at the extension's container,
+	// so this lands on ~/Library/Containers/<appex id>/Data/Library/
+	// Application Support/S-MU2000 -- the same directory the engine already
+	// writes log.txt and boot snapshots into. The container app puts the ROMs
+	// there once (src/auv3/main_app.mm).
 	const char *home = std::getenv("HOME");
 	if (!home || !*home)
 		return {};

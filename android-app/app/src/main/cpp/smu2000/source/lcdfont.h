@@ -151,11 +151,13 @@ inline int overlay_default(std::vector<unsigned char> &rom)
 		"art/lcdfont.txt", "../art/lcdfont.txt",
 		"../../art/lcdfont.txt", "../../../art/lcdfont.txt",
 	};
-	const std::string base = smu2000::exe_dir();
-	if (!base.empty())
-		for (const char *r : REL)
-			if (const int n = overlay(rom, smu2000::join(base, r)))
-				return n;
+	// exe の横に加えて、この関数が入っている DLL / .so の横（プラグイン。issue #67）
+	for (const std::string &base : { smu2000::exe_dir(),
+	                                 smu2000::module_dir(reinterpret_cast<const void *>(&overlay_default)) })
+		if (!base.empty())
+			for (const char *r : REL)
+				if (const int n = overlay(rom, smu2000::join(base, r)))
+					return n;
 	const std::string cfg = smu2000::config_dir();
 	if (!cfg.empty()) {
 		if (const int n = overlay(rom, smu2000::join(cfg, "lcdfont.txt")))
