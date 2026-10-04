@@ -316,7 +316,8 @@ LCD 하드웨어가 없는 엔진이나 1줄 문자 LCD는 별도 네이티브 �
 라이브러리입니다.
 
 - **MU2000 스타일 패널**: Kotlin `VirtualPanelState`가 MIDI에서 파트별 값(레벨, 프로그램, 뱅크, CC7/10/11/91/93/94)을
-  추적하고(`onMidi`는 MIDI 스레드, `tick`/`render`는 LCD 스레드), `VirtualLcd.renderPanel(bitmap, params[32], name[8])`이
+  추적하고(`onMidi`는 MIDI 스레드, `tick`/`render`는 LCD 스레드; 표시 파트는 첫 노트에서 정해 고정하고 12초 넘게 조용할 때만 이동,
+  GM/GS/XG 리셋 SysEx에서 초기화), `VirtualLcd.renderPanel(bitmap, params[32], name[8])`이
   이를 2×24칸 도트(384B)로 구성해 `lcd2000Render`로 그립니다. 도트 규약은 `Lcd2000Renderer.h` 주석 참고
   (위 면 0~16칸 = 레벨미터 18개 + 문자 8자, 아래 면 17~22칸, 23칸 = 제어 비트). `tick()`은 화면에 보이는 값이
   달라졌을 때만 카운터를 올려 `LcdFramePump`가 변화 없는 프레임을 건너뜁니다.
