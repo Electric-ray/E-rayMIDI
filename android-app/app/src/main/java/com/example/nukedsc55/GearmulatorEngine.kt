@@ -230,8 +230,21 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
     override fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
+    /**
+     * 가상 LCD용 상태 추적. LCD가 없는 기종(SC-8820)은 펌웨어가 그려 주는 화면이 없어서,
+     * 같은 MIDI 입력을 읽어 MU2000 스타일 화면을 구성한다 (그 외 기종은 쓰지 않는다).
+     */
+    val panel = VirtualPanelState { ch ->
+        val pc = channelProgram[ch]
+        if (pc < 0) "" else "PC %03d".format(pc + 1)
+    }
+
+    /** 이 기종이 실제 LCD를 가졌는지 — 아니면 가상 LCD를 쓴다 */
+    fun isLcdLessModel(): Boolean = currentModel == Model.SC8820
+
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
+        panel.onMidi(bytes)
         if (!bypassWatchdogs) {
             trackSustain(bytes)
             trackNote(bytes)
@@ -253,6 +266,7 @@ class GearmulatorEngine(val ctx: Context) : IEngine {
             nativeSendMidi((0xB0 or ch) or (120 shl 8))
         }
         resetPartTracking()
+        panel.silence()
     }
 
     override fun getNativeSampleRate(): Int = nativeGetSampleRate()

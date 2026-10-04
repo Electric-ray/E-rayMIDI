@@ -152,8 +152,8 @@ USB MIDI 주변장치 모드를 쓰려면 기기의 개발자 옵션 또는 USB 
 MT-32 ROM 2개 vs .sf2 파일 경로 vs S-YXG50 ROM 2개) 인터페이스에 포함하지 않고,
 재생/정지/MIDI 입력/리셋 등 공통 런타임 동작만 통일했습니다. 채널별 LED 상태
 표시용 `PartInfo` 데이터 클래스도 `IEngine.kt`에 공용으로 정의되어 있고, 네
-엔진의 `getPartInfo()`가 전부 같은 형태로 반환합니다(`MainActivity`의 LED 패널
-빌더/업데이트 함수 하나가 네 엔진 전부를 처리). `MainActivity`는 `IEngine`
+엔진의 `getPartInfo()`가 전부 같은 형태로 반환합니다(v1.9부터 채널 LED 패널은 제거되어
+화면에서는 쓰이지 않고, 모든 모드가 엔진마다 LCD 하나로 표시됩니다 — 아래 "가상 LCD" 참고). `MainActivity`는 `IEngine`
 하나로 네 엔진을 동일한 방식으로 전환합니다.
 
 ### 샘플레이트 전략
@@ -310,6 +310,21 @@ LcdFramePump(~30fps, seq가 같으면 생략, 비트맵 3장 순환) → LcdView
   구현하고 `LcdFramePump`에 람다로 넘기면 됩니다. 픽셀 포맷은 `ARGB_8888` 비트맵 =
   RGBA 바이트 순서이며 모든 알파는 0xFF로 씁니다.
 
+### 가상 LCD — SoundFont / SC-8820 / MT-32(Munt) (v1.9)
+LCD 하드웨어가 없는 엔진이나 1줄 문자 LCD는 별도 네이티브 라이브러리 `vlcd-jni`(`cpp/vlcd/VirtualLcd.cpp`)가
+기존 두 렌더러(`Lcd2000Renderer`, `Lcd88Renderer`)를 그대로 재사용해 그립니다. 엔진 의존성이 없는 순수 계산
+라이브러리입니다.
+
+- **MU2000 스타일 패널**: Kotlin `VirtualPanelState`가 MIDI에서 파트별 값(레벨, 프로그램, 뱅크, CC7/10/11/91/93/94)을
+  추적하고(`onMidi`는 MIDI 스레드, `tick`/`render`는 LCD 스레드), `VirtualLcd.renderPanel(bitmap, params[32], name[8])`이
+  이를 2×24칸 도트(384B)로 구성해 `lcd2000Render`로 그립니다. 도트 규약은 `Lcd2000Renderer.h` 주석 참고
+  (위 면 0~16칸 = 레벨미터 18개 + 문자 8자, 아래 면 17~22칸, 23칸 = 제어 비트). `tick()`은 화면에 보이는 값이
+  달라졌을 때만 카운터를 올려 `LcdFramePump`가 변화 없는 프레임을 건너뜁니다.
+- **문자 LCD**: `TextLcdSource`(문자열이 바뀔 때만 갱신) → `VirtualLcd.renderText` → 120×9 도트 → `Lcd88Renderer`
+  (`Lcd88Look::CmGreen`, 1000×92).
+- 연결: `SoundFontEngine.panel`, `GearmulatorEngine.panel`(SC-8820만 사용)이 각 엔진의 `dispatchMidi`에서 `onMidi`를
+  부르고, `MainActivity`가 엔진마다 `LcdFramePump` 하나로 LCD를 갱신합니다. 새 엔진을 추가할 때는 LCD가 있으면 JNI 3함수
+  (`Size/Seq/Frame`)를, 없으면 `VirtualPanelState`를 쓰면 됩니다.
 ### MIDI 파일 플레이어의 상태 전달 (v1.9)
 `MidiFilePlayer.onStateChanged`가 재생/일시정지/정지/자연 종료마다 호출되어
 `MidiPlayerPanel`이 MediaSession 재생 상태를 갱신합니다 — UI 타이머(화면이 꺼지면

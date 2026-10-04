@@ -141,8 +141,15 @@ class SoundFontEngine(val ctx: Context) : IEngine {
     override fun stopUsb() { usbMgr?.disconnect(); usbMgr = null }
 
     // ── MIDI 디스패치 ────────────────────────────────────────────────────
+    /**
+     * 가상 LCD용 상태 추적 (레벨미터, 프로그램, 볼륨/팬/리버브/코러스). FluidSynth에는 LCD가 없어서
+     * 같은 MIDI 입력을 읽어 MU2000 스타일 화면을 구성한다 — MainActivity의 LcdFramePump가 사용.
+     */
+    val panel = VirtualPanelState { ch -> runCatching { nativeGetChannelPresetName(ch) }.getOrDefault("") }
+
     override fun dispatchMidi(bytes: ByteArray) {
         if (bytes.isEmpty()) return
+        panel.onMidi(bytes)
         // FIX (스트링/레거토 같은 음 재트리거 시 잔향 대응): SC55Engine과 동일한 근거.
         // 같은 (채널,노트)이 이미 켜져있다고 추적되는데 새 Note On이 들어오면,
         // 이전 Note Off가 RTP로 유실된 것이므로 워치독 타임아웃을 기다리지 않고 즉시
@@ -180,6 +187,7 @@ class SoundFontEngine(val ctx: Context) : IEngine {
             nativeSendMidi((0xB0 or ch) or (123 shl 8))
             nativeSendMidi((0xB0 or ch) or (120 shl 8))
         }
+        panel.silence()
     }
 
     fun version(): String = nativeGetVersion()

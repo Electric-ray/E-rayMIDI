@@ -291,3 +291,28 @@ target_link_libraries(mu2000-jni
     ${aaudio-lib}
     ${jnigraphics-lib}
 )
+
+# ---------------------------------------------------------------------------
+# vlcd-jni — 가상 LCD (v1.9+)
+# LCD가 없는 엔진(SoundFont/FluidSynth, SC-8820)과 MT-32 문자 LCD(Munt)를 앱의 다른 LCD
+# (88emu, S-MU2000)와 같은 모양으로 그린다. 두 렌더러를 그대로 재사용하는 순수 계산 라이브러리.
+# ---------------------------------------------------------------------------
+add_library(
+    vlcd-jni
+    SHARED
+    vlcd/VirtualLcd.cpp
+    ${SMU2000_ROOT}/Lcd2000Renderer.cpp
+    ${GEARMULATOR_ROOT}/Lcd88Renderer.cpp
+)
+
+target_include_directories(vlcd-jni PRIVATE
+    ${SMU2000_ROOT}
+    ${GEARMULATOR_ROOT}
+)
+
+target_compile_options(vlcd-jni PRIVATE -O3)
+
+target_link_libraries(vlcd-jni
+    ${log-lib}
+    ${jnigraphics-lib}
+)

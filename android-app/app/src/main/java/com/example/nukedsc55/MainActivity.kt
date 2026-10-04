@@ -33,10 +33,7 @@ class MainActivity : AppCompatActivity() {
 // 화면이 깜빡이는 것으로 보이는 현상 완화를 위해 폴링 간격을 넉넉하게.
 private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         // munt-android 원본 GUI의 LED 색상 그대로 재사용
-        private const val LED_OFF     = 0xFF333355.toInt()
-        private const val LED_ON      = 0xFF00EE44.toInt()
-        private const val LED_RHY_OFF = 0xFF332222.toInt()
-        private const val LED_RHY_ON  = 0xFFEE2222.toInt()
+    
     }
 
     private lateinit var rgConnection: RadioGroup
@@ -57,29 +54,20 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var romStatusRow: LinearLayout
     private lateinit var lcdFrame:    android.view.View
     private lateinit var ivLcd:       LcdView
-    private lateinit var llMuntContainer: LinearLayout
-    private lateinit var llMuntPanel: LinearLayout
-    private lateinit var muntLcdView: MuntLcdView
-    private lateinit var llSoundfontPanel: LinearLayout
-    private lateinit var llGearmulatorPanel: LinearLayout
-    private lateinit var llGearmulatorContainer: LinearLayout
-    private lateinit var gearmulatorLcdView: MuntLcdView
-    // 88emu 실제 LCD(SC-55/88 유리 LCD, SC-8850, MT-32/CM 도트) — 엔진이 합성한 비트맵을 표시
+    // 모든 모드가 베젤 안을 LCD 하나로 채운다 (채널별 LED 인디케이터 패널은 제거됨). 각 LCD는 LcdFramePump가
+    // ~30fps로 갱신한다.
+    //  - Munt(MT-32): 1줄 문자 LCD를 연두색 도트 LCD로 (VirtualLcd.renderText)
+    //  - SoundFont(FluidSynth): MU2000 스타일 가상 LCD (MIDI에서 추적한 값, VirtualPanelState)
+    //  - 88emu: 실제 LCD (SC-55/88 유리 LCD, SC-8850, MT-32/CM 도트). LCD가 없는 SC-8820은 가상 LCD
+    //  - S-MU2000: 실제 LCD
+    private lateinit var muntLcdView: LcdView
+    private lateinit var muntLcdPump: LcdFramePump
+    private lateinit var sfLcdView: LcdView
+    private lateinit var sfLcdPump: LcdFramePump
     private lateinit var gearLcdView: LcdView
     private lateinit var gearLcdPump: LcdFramePump
-    private lateinit var llMu2000Panel: LinearLayout
-    private lateinit var llMu2000Container: LinearLayout
-    // S-MU2000 실제 LCD (LcdFramePump가 ~30fps로 갱신)
     private lateinit var mu2000LcdView: LcdView
     private lateinit var mu2000LcdPump: LcdFramePump
-    private lateinit var muntLeds: Array<android.view.View?>
-    private lateinit var muntNames: Array<TextView?>
-    private lateinit var sfLeds: Array<android.view.View?>
-    private lateinit var sfNames: Array<TextView?>
-    private lateinit var gearLeds: Array<android.view.View?>
-    private lateinit var gearNames: Array<TextView?>
-    private lateinit var mu2000Leds: Array<android.view.View?>
-    private lateinit var mu2000Names: Array<TextView?>
 
     private lateinit var sc55Engine: SC55Engine
     private lateinit var sfEngine:   SoundFontEngine
@@ -281,113 +269,25 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         }
     }
 
-    // ── 악기명 패널 (MT-32/SoundFont용, SC-55 LCD보다 훨씬 가벼운 텍스트 폴링) ────
-    private var instrumentPanelRunning = false
-    private val INSTRUMENT_PANEL_INTERVAL_MS = 400L
-    private val instrumentPanelRunnable = object : Runnable {
-        override fun run() {
-            when (activeEngineType) {
-                EngineType.MUNT -> if (muntEngine.engineRunning) {
-                    updateLedPanel(muntLeds, muntNames, muntEngine.getPartInfo(), 8)
-                    muntLcdView.setText(muntEngine.getLcdText())
-                }
-                EngineType.SOUNDFONT -> if (sfEngine.engineRunning) updateLedPanel(sfLeds, sfNames, sfEngine.getPartInfo(), 9)
-                EngineType.GEARMULATOR -> if (gearmulatorEngine.engineRunning) {
-                    updateLedPanel(gearLeds, gearNames, gearmulatorEngine.getPartInfo(), null)
-                    // 실제 LCD 프레임을 합성할 수 있는 기종(SC-55/88, SC-8850, MT-32/CM)은
-                    // gearLcdView(LcdFramePump가 ~30fps로 갱신)를 보여준다. 그 외에 문자 텍스트만
-                    // 있는 경우에만 예전 텍스트 뷰로 폴백하고, LCD가 전혀 없는 기종은 둘 다 접는다.
-                    val hasGraphic = gearmulatorEngine.hasGraphicLcd()
-                    gearLcdView.visibility = if (hasGraphic) android.view.View.VISIBLE else android.view.View.GONE
-                    val hasText = !hasGraphic && gearmulatorEngine.hasTextDisplay()
-                    gearmulatorLcdView.visibility = if (hasText) android.view.View.VISIBLE else android.view.View.GONE
-                    if (hasText) gearmulatorLcdView.setText(gearmulatorEngine.getLcdText())
-                }
-                EngineType.MU2000 -> if (mu2000Engine.engineRunning) {
-                    updateLedPanel(mu2000Leds, mu2000Names, mu2000Engine.getPartInfo(), null)
-                    // 첫 스냅샷(부팅 후 ~0.03초)이 생기면 LCD를 보여준다
-                    mu2000LcdView.visibility =
-                        if (mu2000Engine.nativeGetLcdSize() != 0) android.view.View.VISIBLE else android.view.View.GONE
-                }
-                else -> {}
-            }
-            if (instrumentPanelRunning) uiHandler.postDelayed(this, INSTRUMENT_PANEL_INTERVAL_MS)
-        }
-    }
-
+    // ── 엔진별 LCD 갱신 (LcdFramePump) ───────────────────────────────────
+    // 예전 이름(startInstrumentPanel/stopInstrumentPanel)을 그대로 두고 내용만 바꿨다 — 호출하는 곳이 많다.
+    // 선택된 엔진의 LCD만 돌리고, 화면이 꺼지면(onPause) 전부 멈춘다.
     private fun startInstrumentPanel() {
-        if (instrumentPanelRunning) return
-        instrumentPanelRunning = true
-        uiHandler.post(instrumentPanelRunnable)
+        when (activeEngineType) {
+            EngineType.MUNT -> muntLcdPump.start()
+            EngineType.SOUNDFONT -> sfLcdPump.start()
+            EngineType.GEARMULATOR -> gearLcdPump.start()
+            EngineType.MU2000 -> mu2000LcdPump.start()
+            else -> {}
+        }
     }
 
     private fun stopInstrumentPanel() {
-        instrumentPanelRunning = false
-        uiHandler.removeCallbacks(instrumentPanelRunnable)
+        if (!::muntLcdPump.isInitialized) return
+        muntLcdPump.stop(); sfLcdPump.stop(); gearLcdPump.stop(); mu2000LcdPump.stop()
     }
 
-    // ── LED 패널 공용 헬퍼 (원래 munt-android 원본 GUI 재현용이었던 것을
-    //    SoundFont/S-YXG50도 같은 방식으로 쓸 수 있게 일반화) ──────────────
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    private fun buildLedPanelViews(container: LinearLayout, labels: List<String>): Pair<Array<android.view.View?>, Array<TextView?>> {
-        val leds = arrayOfNulls<android.view.View>(labels.size)
-        val names = arrayOfNulls<TextView>(labels.size)
-        for (i in labels.indices) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).also { it.topMargin = dp(3) }
-            }
-            val led = android.view.View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).also { it.marginEnd = dp(8) }
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(LED_OFF)
-                }
-            }
-            val label = TextView(this).apply {
-                text = labels[i]
-                setTextColor(0xFF888888.toInt())
-                textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(dp(40), LinearLayout.LayoutParams.WRAP_CONTENT)
-            }
-            val patch = TextView(this).apply {
-                text = "---"
-                setTextColor(0xFF00FF88.toInt())
-                textSize = 11f
-                typeface = android.graphics.Typeface.MONOSPACE
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            }
-            row.addView(led); row.addView(label); row.addView(patch)
-            container.addView(row)
-            leds[i] = led
-            names[i] = patch
-        }
-        return leds to names
-    }
-
-    private fun updateLedPanel(
-        leds: Array<android.view.View?>, names: Array<TextView?>,
-        info: PartInfo, rhythmIndex: Int?
-    ) {
-        for (i in leds.indices) {
-            val on = (info.states shr i) and 1L != 0L
-            val rhy = (i == rhythmIndex)
-            val color = when {
-                on && rhy -> LED_RHY_ON
-                on        -> LED_ON
-                rhy       -> LED_RHY_OFF
-                else      -> LED_OFF
-            }
-            (leds[i]?.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
-            names[i]?.text = info.names.getOrElse(i) { "---" }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -421,42 +321,64 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         romStatusRow = findViewById(R.id.romStatusRow)
         lcdFrame    = findViewById(R.id.lcdFrame)
         ivLcd       = findViewById(R.id.ivLcd)
-        llMuntContainer = findViewById(R.id.llMuntContainer)
-        llMuntPanel = findViewById(R.id.llMuntPanel)
+        // ── LCD 뷰와 프레임 공급 (모든 모드가 같은 구조) ──
         muntLcdView = findViewById(R.id.muntLcdView)
-        llSoundfontPanel = findViewById(R.id.llSoundfontPanel)
-        llGearmulatorPanel = findViewById(R.id.llGearmulatorPanel)
-        llGearmulatorContainer = findViewById(R.id.llGearmulatorContainer)
-        gearmulatorLcdView = findViewById(R.id.gearmulatorLcdView)
+        sfLcdView = findViewById(R.id.sfLcdView)
         gearLcdView = findViewById(R.id.gearLcdView)
-        // SC-55용 ivLcd와 같은 이유(네이티브가 비트맵 픽셀을 직접 씀)로 소프트웨어 레이어 사용
-        gearLcdView.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-        gearLcdPump = LcdFramePump(
-            view = gearLcdView,
-            handler = lcdBgHandler,
-            isRunning = { gearmulatorEngine.engineRunning },
-            sizeProvider = { gearmulatorEngine.nativeGetLcdSize() },
-            seqProvider = { gearmulatorEngine.nativeGetLcdSeq() },
-            fill = { bmp -> gearmulatorEngine.nativeGetLcdFrame(bmp) }
-        )
-        llMu2000Panel = findViewById(R.id.llMu2000Panel)
-        llMu2000Container = findViewById(R.id.llMu2000Container)
         mu2000LcdView = findViewById(R.id.mu2000LcdView)
-        mu2000LcdView.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+        // SC-55용 ivLcd와 같은 이유(네이티브가 비트맵 픽셀을 직접 씀)로 소프트웨어 레이어 사용
+        for (v in listOf(muntLcdView, sfLcdView, gearLcdView, mu2000LcdView))
+            v.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+
+        // Munt(MT-32): 1줄 20문자 LCD -> 연두색 도트 LCD. 문자열이 바뀐 경우에만 다시 그린다 (100ms 폴링)
+        val muntText = TextLcdSource { muntEngine.getLcdText() }
+        muntLcdPump = LcdFramePump(
+            view = muntLcdView, handler = lcdBgHandler,
+            isRunning = { muntEngine.engineRunning },
+            sizeProvider = { muntText.size() },
+            seqProvider = { muntText.tick() },
+            fill = { bmp -> muntText.render(bmp) },
+            intervalMs = 100L
+        )
+
+        // SoundFont(FluidSynth): MU2000 스타일 가상 LCD. 탭 = 다음 파트 선택, 길게 누르기 = 자동 추적
+        sfLcdPump = LcdFramePump(
+            view = sfLcdView, handler = lcdBgHandler,
+            isRunning = { sfEngine.engineRunning },
+            sizeProvider = { VirtualLcd.panelSize() },
+            seqProvider = { sfEngine.panel.tick() },
+            fill = { bmp -> sfEngine.panel.render(bmp) }
+        )
+        sfLcdView.setOnClickListener { sfEngine.panel.cycleFocus() }
+        sfLcdView.setOnLongClickListener { sfEngine.panel.autoFocus(); true }
+
+        // 88emu: 실제 LCD. LCD가 없는 기종(SC-8820)은 같은 MU2000 스타일 가상 LCD로 대신한다
+        gearLcdPump = LcdFramePump(
+            view = gearLcdView, handler = lcdBgHandler,
+            isRunning = { gearmulatorEngine.engineRunning },
+            sizeProvider = {
+                if (gearmulatorEngine.isLcdLessModel()) VirtualLcd.panelSize() else gearmulatorEngine.nativeGetLcdSize()
+            },
+            seqProvider = {
+                if (gearmulatorEngine.isLcdLessModel()) gearmulatorEngine.panel.tick() else gearmulatorEngine.nativeGetLcdSeq()
+            },
+            fill = { bmp ->
+                if (gearmulatorEngine.isLcdLessModel()) gearmulatorEngine.panel.render(bmp) else gearmulatorEngine.nativeGetLcdFrame(bmp)
+            }
+        )
+        gearLcdView.setOnClickListener { if (gearmulatorEngine.isLcdLessModel()) gearmulatorEngine.panel.cycleFocus() }
+        gearLcdView.setOnLongClickListener {
+            if (gearmulatorEngine.isLcdLessModel()) { gearmulatorEngine.panel.autoFocus(); true } else false
+        }
+
+        // S-MU2000: 실제 LCD
         mu2000LcdPump = LcdFramePump(
-            view = mu2000LcdView,
-            handler = lcdBgHandler,
+            view = mu2000LcdView, handler = lcdBgHandler,
             isRunning = { mu2000Engine.engineRunning },
             sizeProvider = { mu2000Engine.nativeGetLcdSize() },
             seqProvider = { mu2000Engine.nativeGetLcdSeq() },
             fill = { bmp -> mu2000Engine.nativeGetLcdFrame(bmp) }
         )
-        val muntLabels = (2..9).map { "CH$it" } + "CH10"
-        val ch16Labels = (1..16).map { "CH$it" }
-        buildLedPanelViews(llMuntPanel, muntLabels).let { (l, n) -> muntLeds = l; muntNames = n }
-        buildLedPanelViews(llSoundfontPanel, ch16Labels).let { (l, n) -> sfLeds = l; sfNames = n }
-        buildLedPanelViews(llGearmulatorPanel, ch16Labels).let { (l, n) -> gearLeds = l; gearNames = n }
-        buildLedPanelViews(llMu2000Panel, ch16Labels).let { (l, n) -> mu2000Leds = l; mu2000Names = n }
         // FIX (깜빡임): nativeGetLcdFrame()이 JNI AndroidBitmap_lockPixels/unlockPixels로
         // 비트맵 픽셀을 직접 쓰는데, 이런 native 측 픽셀 변경은 HWUI가
         // 텍스처 재업로드 여부를 판단하는 generation 카운터를 거치지 않아,
@@ -546,13 +468,13 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
         layoutSoundFontPicker.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
         // LCD는 SC-55 전용 (munt/SoundFont/88emu/MU2000는 실제 LCD 컨트롤러 에뮬레이션이 없음)
         lcdFrame.visibility = if (!isSoundFont && !isMunt && !isGearmulator && !isMu2000) android.view.View.VISIBLE else android.view.View.GONE
-        // 악기명 패널은 같은 LED 패널 스타일(엔진당 하나씩)
-        llMuntContainer.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
-        llSoundfontPanel.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
-        llGearmulatorContainer.visibility = if (isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
+        // 엔진마다 LCD 하나 (한 번에 하나만 보인다)
+        muntLcdView.visibility = if (isMunt) android.view.View.VISIBLE else android.view.View.GONE
+        sfLcdView.visibility = if (isSoundFont) android.view.View.VISIBLE else android.view.View.GONE
+        gearLcdView.visibility = if (isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
+        mu2000LcdView.visibility = if (isMu2000) android.view.View.VISIBLE else android.view.View.GONE
         btnGearmulatorModel.visibility = if (isGearmulator) android.view.View.VISIBLE else android.view.View.GONE
         if (isGearmulator) refreshGearmulatorModelButton()
-        llMu2000Container.visibility = if (isMu2000) android.view.View.VISIBLE else android.view.View.GONE
         // ROM 상태 표시는 ROM 파일이 필요한 엔진에서만 (SoundFont는 .sf2 파일 선택 UI로 대체)
         romStatusRow.visibility = if (isSoundFont) android.view.View.GONE else android.view.View.VISIBLE
         if (isSoundFont) refreshSoundFontSelection()

@@ -174,113 +174,36 @@
                         android:layout_height="match_parent" />
                 </FrameLayout>
 
-                <LinearLayout
-                    android:id="@+id/llMuntContainer"
+                <!-- 모든 모드가 같은 구조다: 베젤 안을 LCD 하나가 꽉 채운다 (LcdView가 종횡비를 유지하며
+                     최대한 크게 그린다). 채널별 LED 인디케이터 패널은 그래픽 LCD가 없던 시절의 임시방편이라
+                     제거했다. 한 번에 하나만 visible이고 나머지는 GONE이다.
+                       muntLcdView : Munt(MT-32) 1줄 문자 LCD → 연두색 도트 LCD (가상 LCD)
+                       sfLcdView   : SoundFont(FluidSynth) → MU2000 스타일 가상 LCD (탭 = 파트 선택)
+                       gearLcdView : 88emu → 실제 LCD (SC-8820처럼 LCD가 없는 기종은 가상 LCD)
+                       mu2000LcdView: S-MU2000 실제 LCD -->
+                <com.example.nukedsc55.LcdView
+                    android:id="@+id/muntLcdView"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:orientation="vertical"
-                    android:visibility="gone">
+                    android:visibility="gone" />
 
-                    <!-- 실제 mt32emu가 에뮬레이션하는 MT-32/CM-32L LCD 텍스트를
-                     SC-55처럼 그래픽 도트매트릭스 LCD 느낌으로 그린다
-                     (MuntLcdView 참고 — 작은 비트맵을 최근접 이웃으로 확대). -->
-                    <com.example.nukedsc55.MuntLcdView
-                        android:id="@+id/muntLcdView"
-                        android:layout_width="match_parent"
-                        android:layout_height="90dp"
-                        android:layout_marginBottom="6dp" />
-
-                    <ScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1">
-
-                        <LinearLayout
-                            android:id="@+id/llMuntPanel"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical" />
-                    </ScrollView>
-                </LinearLayout>
-
-                <ScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent">
-
-                    <LinearLayout
-                        android:id="@+id/llSoundfontPanel"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:visibility="gone" />
-                </ScrollView>
-
-                <LinearLayout
-                    android:id="@+id/llGearmulatorContainer"
+                <com.example.nukedsc55.LcdView
+                    android:id="@+id/sfLcdView"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:orientation="vertical"
-                    android:visibility="gone">
+                    android:visibility="gone" />
 
-                    <!-- 88emu 실제 LCD 프레임: SC-55/SC-88 유리 LCD(레벨미터 포함), SC-8850, MT-32/CM 도트.
-                     엔진(Lcd88Renderer)이 합성한 비트맵을 LcdView가 종횡비 유지로 표시한다.
-                     LCD가 없는 기종에서는 코드에서 GONE 처리. -->
-                    <com.example.nukedsc55.LcdView
-                        android:id="@+id/gearLcdView"
-                        android:layout_width="match_parent"
-                        android:layout_height="130dp"
-                        android:layout_marginBottom="6dp"
-                        android:visibility="gone" />
-
-                    <!-- 88lib가 노출하는 문자 LCD 텍스트(그래픽 프레임을 못 쓰는 경우의 폴백). -->
-                    <com.example.nukedsc55.MuntLcdView
-                        android:id="@+id/gearmulatorLcdView"
-                        android:layout_width="match_parent"
-                        android:layout_height="90dp"
-                        android:layout_marginBottom="6dp" />
-
-                    <ScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1">
-
-                        <LinearLayout
-                            android:id="@+id/llGearmulatorPanel"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical" />
-                    </ScrollView>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/llMu2000Container"
+                <com.example.nukedsc55.LcdView
+                    android:id="@+id/gearLcdView"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:orientation="vertical"
-                    android:visibility="gone">
+                    android:visibility="gone" />
 
-                    <!-- S-MU2000 실제 LCD 프레임(Lcd2000Renderer가 합성): 레벨미터, 음색명, 파트/뱅크,
-                     악기 모양, VOL/EXP 막대, PAN 바늘, REV/CHO/VAR 부채꼴, KEY 7세그, XG/GS/PERFORM. -->
-                    <com.example.nukedsc55.LcdView
-                        android:id="@+id/mu2000LcdView"
-                        android:layout_width="match_parent"
-                        android:layout_height="110dp"
-                        android:layout_marginBottom="6dp"
-                        android:visibility="gone" />
-
-                    <ScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="0dp"
-                        android:layout_weight="1">
-
-                        <LinearLayout
-                            android:id="@+id/llMu2000Panel"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical" />
-                    </ScrollView>
-                </LinearLayout>
-            </FrameLayout>
+                <com.example.nukedsc55.LcdView
+                    android:id="@+id/mu2000LcdView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone" />            </FrameLayout>
 
             <!-- 상태 로그 + ROM 상태: 좌우 배치 (표시 정보량에 비해 세로로 쌓으면 폭이 너무 넓었음) -->
             <LinearLayout

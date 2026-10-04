@@ -33,7 +33,9 @@ Sound Canvas·MT-32 계열 통합 LLE 엔진), [tarboh/S-MU2000](https://github.
 > 뒤 소리가 영영 안 나던 문제**(AAudio 스트림이 끊긴 채 방치되던 것)와 **블루투스
 > 재생/일시정지 키가 먹통이던 문제**(MediaSession 재생 상태가 굳어 있던 것)를
 > 고쳤고, MIDI 파일 플레이어가 **마지막으로 들은 곡을 기억**해 엔진을 바꾸거나
-> 앱을 다시 켜도 그 곡부터 이어집니다. 자세한 변경 내역은
+> 앱을 다시 켜도 그 곡부터 이어집니다. 또 **채널별 LED 인디케이터 패널을 없애고** 그 자리만큼
+> LCD를 키웠으며, 모든 모드가 LCD 하나로 통일되도록 **SoundFont(FluidSynth)와 MT-32(Munt)도
+> LCD로 표시**합니다 (SoundFont는 MU2000 스타일 가상 LCD). 자세한 변경 내역은
 > [아래 "v1.9에서 달라진 점"](#v19에서-달라진-점) 참고.
 >
 > **v1.7 패치 노트**: 외부 PC 없이 **기기에 저장된 .mid/.midi/.kar 파일을 직접
@@ -255,9 +257,8 @@ AAudio 데이터 콜백 — 링버퍼에서 pop만 (절대 무거운 연산 안 
   맞춰 회전(세로 모드는 애초에 지원 안 함, 레이아웃이 가로 전용으로 설계됨)
 - 왼쪽 "MODE" 패널: 4개 엔진을 LED 인디케이터 스타일 토글 버튼으로 선택
 - 오른쪽 "LINK" 패널: 3개 연결 방식을 같은 스타일로 선택 + 초기화/연결 버튼
-- 가운데: LCD(SC-55)/LED 채널 패널(MT-32·SoundFont·S-YXG50 — 채널별 LED +
-  악기명/뱅크·프로그램 텍스트를 16채널까지 스크롤 표시, 세 엔진 모두 통일된
-  형태) + 상태 로그 + ROM 상태를 좌우로 배치
+- 가운데: LCD + 상태 로그 + ROM 상태를 좌우로 배치. (v1.9부터는 채널별 LED 패널 없이
+  모든 모드가 베젤 안을 LCD 하나로 꽉 채웁니다 — "v1.9 - 7" 참고)
 - 볼륨 조절 등 실제로 기능하지 않는 장식용 노브는 넣지 않고, 실제로 쓰는 버튼만
   구성 (앱 자체의 오디오 게인 조절 UI는 없음 — 기기 볼륨 버튼을 사용)
 
@@ -312,7 +313,8 @@ Galaxy A50(Android 11)·일부 구형 Android 10 기기에서 "LCD 화면이 여
 mt32emu가 자체적으로 에뮬레이션하는 실제 MT-32/CM-32L LCD 텍스트(`Synth::
 getDisplayState()` — PC용 munt가 보여주는 것과 동일: 파트 활성 표시, Rhythm,
 마스터 볼륨)를 가져와서, SC-55처럼 **그래픽 도트매트릭스 LCD**로 그립니다
-(`MuntLcdView`). mt32emu는 픽셀이 아니라 텍스트만 주기 때문에, 커스텀 폰트
+(`MuntLcdView` — v1.9에서 제거되고 연두색 도트 LCD로 교체됨, "v1.9 - 7" 참고).
+mt32emu는 픽셀이 아니라 텍스트만 주기 때문에, 커스텀 폰트
 데이터를 직접 만드는 대신 더 안전한 방식을 썼습니다:
 - 아주 작은 오프스크린 비트맵에 모노스페이스 폰트로 문자를 한 칸씩 고정폭으로
   그려서(칸마다 중앙 정렬 — 문자 폭이 흔들려 텍스트 위치가 밀리는 문제 방지),
@@ -395,10 +397,9 @@ Debug 빌드에서도 항상 최적화되도록 고쳤습니다. 이 수정 하�
 제공합니다. 확인해보니 SC-55/SC-88/SC-88Pro도 MT-32/CM-32L과 같은 HD44780
 계열이라, 텍스트가 정상적으로 나옵니다(SC-8850만 진짜 그래픽 LCD라 API가
 텍스트를 주지 않습니다). 그래서:
-- 문자 LCD가 있는 기종(MT-32/CM-32L류, SC-55/SC-88/SC-88Pro)은 기존
-  `MuntLcdView`(도트매트릭스 스타일 렌더링)로 실제 기기 텍스트를 보여줍니다.
-- SC-8850처럼 그래픽 전용 LCD 기종은 LCD 영역이 자동으로 접히고, 채널별 LED
-  패널(활성 상태 + Program Change 번호)만 크게 표시됩니다.
+- (v1.9 이전 방식) 문자 LCD가 있는 기종은 `MuntLcdView`로 텍스트를 도트매트릭스처럼
+  보여주고, SC-8850처럼 그래픽 전용 LCD 기종은 LCD 영역을 접고 채널별 LED 패널만
+  표시했습니다. v1.9부터는 모든 LCD 기종이 실제 LCD 프레임으로 표시됩니다 ("v1.9 - 1").
 - 이 전환은 자동입니다 — 어떤 기종을 고르든 실행 중에 판별해서 알맞은 화면으로
   바뀝니다.
 
@@ -626,6 +627,37 @@ S-MU2000 코어를 업스트림 `7d0fb8a`(9/28)에서 `b26bfa5`(10/3)로 올렸�
 - **참고**: 앱은 S-MU2000의 가벼운 모드(`set_native_engine`/`set_native_fx`)를 아직 켜지
   않은 풀 에뮬레이션입니다. 업스트림 문서상 CPU를 2~3배 줄일 수 있어 장기 후보입니다.
 - 88emu 쪽 후보(LA32 개선, XP 칩 수정, JIT 컴파일 워커)는 적용하지 않았습니다.
+### 7. 채널 인디케이터 제거 — 모든 모드가 LCD 하나로 (SoundFont도 LCD)
+채널별 LED 인디케이터 패널은 그래픽 LCD가 되지 않던 시절의 임시방편이었습니다. 이제
+모든 모드에서 LCD를 쓸 수 있으므로 **인디케이터를 전부 없애고, 그 자리만큼 LCD를
+키웠습니다** (베젤 안을 `LcdView`가 종횡비를 유지하며 꽉 채웁니다).
+
+| 모드 | 표시되는 LCD |
+|---|---|
+| SC-55 | Nuked-SC55 LCD (기존) |
+| 88emu | 펌웨어가 그리는 실제 LCD (SC-55/88 유리, SC-8850, MT-32/CM 도트). LCD가 없는 SC-8820은 가상 LCD |
+| S-MU2000 | 실제 MU2000 LCD |
+| MT-32 (Munt) | 1줄 20문자 LCD를 **연두색 도트 LCD**로 (88emu MT-32와 같은 모양) |
+| SoundFont | **MU2000 스타일 가상 LCD** |
+
+- **가상 LCD** (`vlcd-jni`): SoundFont(FluidSynth)에는 LCD가 없으므로, 앱이 같은 MIDI 입력을 한 번
+  더 읽어 `VirtualPanelState`로 파트별 값을 추적합니다 — 노트온 벨로시티로 레벨미터를 올리고
+  시간에 따라 내림(누르고 있으면 천천히), 프로그램/뱅크, 볼륨(CC7), 익스프레션(CC11), 팬(CC10),
+  리버브(CC91), 코러스(CC93), 베리에이션(CC94). 음색명은 FluidSynth 프리셋명을 씁니다.
+  이 값으로 MU2000 LCD의 2×24칸 도트(384바이트)를 구성해 S-MU2000과 **같은 렌더러**
+  (`Lcd2000Renderer`)로 그리므로 두 모드가 한 가족처럼 보입니다: 위쪽에 16파트 레벨미터와 음색명,
+  아래쪽에 파트 번호/프로그램/악기 모양, VOL·EXP 막대, PAN 바늘, REV·CHO 부채꼴.
+- **파트 선택**: 표시 중심 파트는 마지막으로 소리가 났거나 프로그램이 바뀐 파트를 자동으로 따라가고,
+  **화면을 탭하면 파트 1→16 순서로 직접 선택**, **길게 누르면 자동 추적으로 복귀**합니다.
+- **MT-32 문자 LCD**: `TextLcdSource`가 Munt의 표시 문자열(`getLcdText()`)이 바뀔 때만 네이티브
+  `renderText()`로 120×9 도트로 만들어 88emu의 연두색 CM 렌더러(`Lcd88Renderer`)로 그립니다.
+  MT-32의 LCD는 원래 1줄이라 화면이 가로로 길고 위아래 여백이 생깁니다.
+- **제거한 것**: `MuntLcdView.kt`, MainActivity의 채널 LED 패널 빌더/갱신 코드와 `activity_main.xml`의
+  `llMuntPanel`/`llSoundfontPanel`/`llGearmulatorPanel`/`llMu2000Panel`. 엔진의 `getPartInfo()`는
+  남겨 두었지만 화면에서는 쓰지 않습니다.
+- **한계**: 가상 LCD의 레벨미터는 실제 음량이 아니라 MIDI 벨로시티·볼륨 기반 추정입니다. KEY(노트
+  시프트)와 모드 표시(XG/GS)는 추적하지 않아 "+0"만 나옵니다.
+
 ---
 
 ## 주요 기능
@@ -646,17 +678,18 @@ S-MU2000 코어를 업스트림 `7d0fb8a`(9/28)에서 `b26bfa5`(10/3)로 올렸�
 ### 재생 엔진 (다섯 중 선택)
 - **SC-55**: Nuked-SC55 코어를 그대로 이식, MCU 사이클 단위 에뮬레이션. 실제 LCD
   컨트롤러 동작을 픽셀 단위로 재현 (파라미터 레벨미터 애니메이션 포함).
-- **MT-32**: munt 코어 이식. 실제 mt32emu LCD 텍스트를 SC-55처럼 그래픽 도트매트릭스
-  스타일로 재현(파트별 LED + 패치명 + LCD 디스플레이). GS 전용으로 만들어진 곡을
+- **MT-32**: munt 코어 이식. 실제 mt32emu LCD 텍스트(파트 활성 표시, Rhythm, 마스터 볼륨)를
+  88emu MT-32와 같은 연두색 도트 LCD로 표시. GS 전용으로 만들어진 곡을
   재생할 때 발생하는 무음 문제에 대한 자동 대응 포함 (아래 "알려진 이슈와 대응" 참고).
-- **SoundFont**: FluidSynth 2.6.0 기반 `.sf2` 재생. 채널별 프리셋명 실시간 표시.
+- **SoundFont**: FluidSynth 2.6.0 기반 `.sf2` 재생. 실제 LCD가 없으므로 MIDI 입력에서 추적한 값으로
+  **MU2000 스타일 가상 LCD**를 그립니다 (16파트 레벨미터, 프리셋명, 뱅크/프로그램, VOL/EXP,
+  PAN, REV/CHO). 화면을 탭하면 표시할 파트를 고를 수 있음.
 - **88emu**: dsp56300/gearmulator 기반 Roland 통합 LLE 엔진. SC-55/SC-88/
   SC-88Pro/SC-8820/SC-8850, MT-32/CM-32L/CM-32P/CM-64 등 11개 기종을 팝업에서
   선택. **펌웨어가 그리는 실제 LCD를 기종별 모양 그대로 표시**(SC-55/SC-88 계열 유리 LCD와
-  레벨미터, SC-8850 그래픽 LCD, MT-32/CM 도트 화면). LCD가 없는 기종은 채널별 LED 패널.
+  레벨미터, SC-8850 그래픽 LCD, MT-32/CM 도트 화면). LCD가 없는 SC-8820은 가상 LCD.
 - **S-MU2000**: tarboh/S-MU2000 기반 YAMAHA MU2000 LLE 엔진(SH7042+SWP30x2 실제
-  펌웨어 구동). 실제 MU2000 LCD(레벨미터, 음색명, VOL/EXP·PAN·REV/CHO/VAR·KEY 표시)와
-  채널별 Program Change 번호 LED 패널을 함께 표시.
+  펌웨어 구동). 실제 MU2000 LCD(레벨미터, 음색명, VOL/EXP·PAN·REV/CHO/VAR·KEY 표시).
 
 ### 안정성 보강 (실사용 중 발견된 버그 수정)
 - RTP-MIDI SysEx가 여러 패킷에 걸쳐 전송될 때 경계 처리 오류로 LCD 애니메이션이
@@ -700,14 +733,15 @@ S-MU2000 코어를 업스트림 `7d0fb8a`(9/28)에서 `b26bfa5`(10/3)로 올렸�
   실제 MT-32 하드웨어에서도 온전히 재생되지 않을 가능성이 있습니다 — SC-55 모드로
   같은 곡을 먼저 확인해보세요).
 - MT-32는 실제 하드웨어 관례상 MIDI 채널 2~9에 8개 파트, 채널 10에 리듬이
-  고정 배정되며 **채널 1은 원래 어떤 파트에도 할당되지 않습니다** — 앱의 LED
-  패널이 CH2부터 시작하는 것은 버그가 아니라 이 관례를 그대로 반영한 것입니다.
+  고정 배정되며 **채널 1은 원래 어떤 파트에도 할당되지 않습니다** — MT-32 LCD의 파트
+  표시가 2번부터 시작하는 것은 버그가 아니라 이 관례를 그대로 반영한 것입니다.
 - SoundFont 모드는 GM 표준까지만 지원하며 Roland GS 전용 확장은 표현하지 못합니다.
 - SC-55 LCD 렌더링에 미세한 깜빡임이 있을 수 있습니다(화면이 깨지거나 겹쳐 보이는
   더 심각한 증상은 v1.4에서 data race를 고쳐서 해결됨 — 위 "v1.4에서 달라진 점" 참고).
 - **(v1.9 해결) 88emu SC-8850 LCD**: 이전에는 API가 그래픽 프레임버퍼를 노출하지 않아 LCD
   영역이 접혀 있었으나, `emu88_get_display_raw()`를 추가해 실제 그래픽 LCD를 표시합니다.
-  LCD가 없는 기종(SC-8820, XP-GS, VE-GS Pro 등)은 여전히 채널별 LED 패널만 나옵니다.
+  LCD가 없는 SC-8820은 SoundFont와 같은 MU2000 스타일 가상 LCD로 표시합니다 (이 폰에는 SC-8820 ROM이
+  없어 실기기 확인은 못 했고 SoundFont 모드의 같은 렌더러로만 검증했습니다).
 - **(v1.9 해결) S-MU2000 LCD**: `lcd_render()`의 도트를 가져와 실제 LCD로 그립니다.
   진짜 `hd44780u_b04.bin`이 없으면 내장 폰트를 쓰므로 기호 글자 모양이 실기와 조금
   다를 수 있습니다. 상단 눈금 띠의 A1/A2·MIC/LINE 박스와 선은 아직 그리지 않습니다
@@ -795,7 +829,8 @@ android-app/
     │   ├── MU2000Engine.kt         # S-MU2000(tarboh/S-MU2000) 어댑터
     │   ├── LcdView.kt              # 그래픽 LCD 표시 뷰 (비트맵을 종횡비 유지로 표시)
     │   ├── LcdFramePump.kt         # 엔진이 합성한 LCD 프레임을 ~30fps로 LcdView에 공급 (88emu/S-MU2000 공용)
-    │   ├── MuntLcdView.kt          # MT-32/88emu 공용 그래픽 LCD (텍스트 → 도트매트릭스 렌더링)
+    │   ├── VirtualLcd.kt           # 가상 LCD JNI (vlcd-jni): MU2000 스타일 패널 / 문자 LCD → 비트맵
+    │   ├── VirtualPanelState.kt    # MIDI에서 레벨미터·프로그램·볼륨/팬/리버브/코러스를 추적 (SoundFont, SC-8820)
     │   ├── RtpMidiSession.kt       # RTP-MIDI(AppleMIDI) 클라이언트
     │   ├── UsbMidiManager.kt       # USB 시리얼 입력 (usb-serial-for-android)
     │   ├── MidiStreamParser.kt     # Running-status/SysEx MIDI 바이트 파서
@@ -805,7 +840,7 @@ android-app/
     │   ├── MidiPlayerPanel.kt      # MIDI 파일 플레이어 UI + MediaSession(블루투스/유선 리모컨)
     │   ├── EngineRegistry.kt       # USB MIDI 주변장치/MIDI 파일 모드용 현재 활성 엔진 참조
     │   ├── UsbMidiDeviceService.kt # 안드로이드를 가상 MIDI 장치로 노출 (MidiDeviceService)
-    │   └── MainActivity.kt         # 가로형 레트로 GUI, LED 채널 패널 공용 로직
+    │   └── MainActivity.kt         # 가로형 레트로 GUI (엔진마다 LCD 하나, LcdFramePump로 갱신)
     └── cpp/
         ├── SC55Bridge.cpp          # Nuked-SC55 JNI 브리지
         ├── MuntBridge.cpp          # munt(mt32emu) JNI 브리지
@@ -813,6 +848,7 @@ android-app/
         ├── GearmulatorBridge.cpp   # 88emu JNI 브리지 (전용 렌더 스레드 + 링버퍼)
         ├── MU2000Bridge.cpp        # S-MU2000 JNI 브리지 (전용 렌더 스레드 + 링버퍼, 바이트스트림 MIDI)
         ├── AAudioRecover.h         # 끊긴 AAudio 스트림 자동 복구 (모든 브리지 공용)
+        ├── vlcd/VirtualLcd.cpp     # 가상 LCD: MU2000 스타일 패널 구성 + 문자 LCD → 도트 (Lcd2000/Lcd88 렌더러 재사용)
         ├── munt/mt32emu/           # munt 코어 소스 (이식됨)
         ├── nuked-sc55/             # Nuked-SC55 코어 소스
         ├── fluidsynth/             # FluidSynth 공식 Android 프리빌트 (include/ + lib/<abi>/)
