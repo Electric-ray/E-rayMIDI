@@ -14,11 +14,16 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.activity.OnBackPressedCallback
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -27,6 +32,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "SC55-Main"
         private const val REQ_LEGACY_STORAGE = 1001
         private const val REQ_MANAGE_STORAGE = 1002
+        private const val STATE_LCD_FULLSCREEN = "lcd_fullscreen"
         // 30fps(33ms)에서 20fps(50ms)로 완화: LCD_Render()가 lcd.mutex.try_lock()을
 // 쓰고, 실패하면 조용히 프레임을 드롭한다(lcd.cpp 확인됨). 렌더 스레드와
 // 폴링 스레드 사이의 위상이 자주 어긋나면서 프레임이 반복적으로 스킵되어
@@ -75,6 +81,15 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
     private lateinit var gearmulatorEngine: GearmulatorEngine
     private lateinit var mu2000Engine: MU2000Engine
     private lateinit var midiPlayerPanel: MidiPlayerPanel
+
+    // ── LCD 전체화면 ─────────────────────────────────────────────────────
+    // 베젤 위의 전체화면 버튼을 누르면 LCD 외의 GUI(타이틀/MODE/LINK/상태줄/플레이어 바)를 숨기고
+    // 시스템 바까지 감춰서(몰입 모드) LCD가 화면을 꽉 채운다. 다시 누르면(또는 뒤로가기) 원래대로 복귀.
+    private lateinit var btnLcdFullscreen: ImageButton
+    private var lcdFullscreen = false
+    private val fullscreenBackCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() { setLcdFullscreen(false) }
+    }
 
     // ── USB MIDI 주변장치(peripheral) 실제 연결 ──────────────────────
     // (munt-android 참고: UsbMidiDeviceService를 매니페스트에 등록해놓는 것만으로는
@@ -429,6 +444,11 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
 
         onEngineSelectionChanged()
         checkAndRequestStoragePermission()
+
+        btnLcdFullscreen = findViewById(R.id.btnLcdFullscreen)
+        btnLcdFullscreen.setOnClickListener { setLcdFullscreen(!lcdFullscreen) }
+        onBackPressedDispatcher.addCallback(this, fullscreenBackCallback)
+        if (savedInstanceState?.getBoolean(STATE_LCD_FULLSCREEN) == true) setLcdFullscreen(true)
     }
 
     override fun onResume() {
@@ -444,6 +464,45 @@ private const val LCD_FPS_INTERVAL_MS = 50L // ~20fps
             null -> {}
         }
         midiPlayerPanel.onResume()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_LCD_FULLSCREEN, lcdFullscreen)
+    }
+
+    // 다이얼로그/알림 등으로 포커스를 잃었다 돌아오면 시스템이 바를 다시 보여줄 수 있어서 몰입 모드를 재적용한다.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && lcdFullscreen) applyImmersive(true)
+    }
+
+    private fun setLcdFullscreen(on: Boolean) {
+        lcdFullscreen = on
+        val vis = if (on) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.titleBar).visibility = vis
+        findViewById<View>(R.id.colMode).visibility = vis
+        findViewById<View>(R.id.colLink).visibility = vis
+        findViewById<View>(R.id.statusRow).visibility = vis
+        // 플레이어 바는 MIDI 파일 모드로 연결 중일 때만 보이는 게 원래 상태다 — 복귀 시 그 상태로 되돌린다
+        findViewById<View>(R.id.llPlayerBar).visibility =
+            if (!on && midiPlayerPanel.isActive) View.VISIBLE else View.GONE
+        val pad = if (on) 0 else dp(8)
+        findViewById<View>(R.id.rootLayout).setPadding(pad, pad, pad, pad)
+        btnLcdFullscreen.setImageResource(if (on) R.drawable.ic_fullscreen_exit else R.drawable.ic_fullscreen)
+        btnLcdFullscreen.contentDescription = if (on) "LCD 전체화면 해제" else "LCD 전체화면"
+        fullscreenBackCallback.isEnabled = on
+        applyImmersive(on)
+    }
+
+    private fun applyImmersive(on: Boolean) {
+        val c = WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     override fun onPause() {

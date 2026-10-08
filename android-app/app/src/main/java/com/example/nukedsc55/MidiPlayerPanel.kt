@@ -49,6 +49,9 @@ class MidiPlayerPanel(
         private const val KEY_LAST = "midi_last_file"   // 마지막으로 재생한 곡(절대 경로) — 엔진 전환/앱 재시작 후 이어서
         private const val KEY_MODE = "midi_mode"
         private const val KEY_VOL = "midi_volume"
+        private const val KEY_SRC = "midi_src"          // 마지막 재생 목록의 출처: 폴더 / 사용자 플레이리스트
+        private const val SRC_FOLDER = "folder"
+        private const val SRC_PLAYLIST = "playlist"
         private const val TICK_MS = 250L
         private const val MEDIA_SESSION_TAG = "E-rayMIDI"
 
@@ -72,6 +75,7 @@ class MidiPlayerPanel(
     private val btnMode: Button = activity.findViewById(R.id.btnPlayMode)
     private val btnBrowse: Button = activity.findViewById(R.id.btnBrowse)
     private val sbVolume: SeekBar = activity.findViewById(R.id.sbVolume)
+    private val btnPlaylist: Button = activity.findViewById(R.id.btnPlaylist)
 
     private var player: MidiFilePlayer? = null
     private var playlist: MidiPlaylist? = null
@@ -79,6 +83,26 @@ class MidiPlayerPanel(
     private var currentDir: File? = null
     private var seeking = false
     private var currentTrackTitle: String = "곡 없음"
+
+    // ── 플레이리스트 ───────────────────────────────────────────────────────────────────────
+    // 재생 목록(MidiPlaylist)은 폴더(탐색기에서 고른 곳) 또는 사용자 플레이리스트(store) 중 하나에서 만들어진다.
+    // 플레이리스트는 폴더를 옮겨 다녀도 별도로 남아 있다 (폴더를 고르면 재생 목록만 교체되고 store는 그대로).
+    private val store = PlaylistStore(prefs)
+    @Volatile private var playingFromPlaylist = false
+    private var plDialog: PlaylistDialog? = null
+
+    private val plHost = object : PlaylistHost {
+        override fun nowPlayingIndex(): Int = if (playingFromPlaylist) (playlist?.index ?: -1) else -1
+        override fun playFromPlaylist(index: Int) { this@MidiPlayerPanel.playFromPlaylist(index) }
+        override fun onPlaylistEdited() { syncPlaylistEdit() }
+        override fun applyPlaylist() {
+            if (playlist == null) return
+            if (playingFromPlaylist) { status("📋 플레이리스트가 이미 적용되어 있습니다"); return }
+            loadPlaylist(null) // 재생 목록을 플레이리스트로 교체 (1번 곡 준비, 재생은 ▶ 로)
+        }
+        override fun pickerStartDir(): File = currentDir ?: defaultDir()
+        override fun saveDir(): File = File(defaultDir(), "playlists")
+    }
 
     private var mediaSession: MediaSession? = null
     private var audioManager: AudioManager? = null
@@ -104,6 +128,7 @@ class MidiPlayerPanel(
         btnNext.setOnClickListener { if (guard()) { playlist?.next(); refresh() } }
         btnPrev.setOnClickListener { if (guard()) { playlist?.prev(); refresh() } }
         btnBrowse.setOnClickListener { showBrowser(currentDir ?: defaultDir()) }
+        btnPlaylist.setOnClickListener { showPlaylist() }
         btnMode.setOnClickListener {
             val pl = playlist ?: return@setOnClickListener
             pl.mode = pl.mode.next()
@@ -145,6 +170,7 @@ class MidiPlayerPanel(
     fun start(engine: IEngine) {
         if (player != null) stop()
         boundEngine = engine
+        playingFromPlaylist = false
         // 파일 재생은 유실이 없는 입력원이므로 RTP용 노트/서스테인 워치독을 꺼야 8초 넘는 긴 음이 끊기지 않는다.
         engine.bypassWatchdogs = true
 
@@ -161,6 +187,7 @@ class MidiPlayerPanel(
                 tvTitle.text = title
                 currentTrackTitle = title
                 updateMediaMetadata()
+                plDialog?.refresh() // 플레이리스트 화면이 열려 있으면 현재 곡 강조를 갱신
             }
         }
         pl.onMessage = { msg -> status(msg) }
@@ -183,13 +210,18 @@ class MidiPlayerPanel(
         // 마지막으로 들은 곡부터 시작한다 (엔진을 바꿔도, 앱을 다시 시작해도). 그 곡이 지금 폴더에 없으면 1번 곡.
         val last = prefs.getString(KEY_LAST, null)?.let { File(it) }?.takeIf { it.isFile }
         val dir = File(prefs.getString(KEY_DIR, null) ?: last?.parentFile?.absolutePath ?: defaultDir().absolutePath)
-        loadFolder(dir, last, false)
+        // 마지막으로 들은 목록이 사용자 플레이리스트였고 아직 곡이 남아 있으면 그 목록으로 이어서, 아니면 폴더로
+        currentDir = dir
+        if (prefs.getString(KEY_SRC, SRC_FOLDER) == SRC_PLAYLIST && store.items.isNotEmpty()) loadPlaylist(last)
+        else loadFolder(dir, last, false)
         bar.visibility = View.VISIBLE
         startTicker()
     }
 
     /** 연결 종료 (엔진이 살아 있는 상태에서 불러야 소리 정리가 엔진에 전달된다). */
     fun stop() {
+        plDialog?.dismiss()
+        plDialog = null
         stopTicker()
         player?.onStateChanged = null
         releaseMediaSession()
@@ -353,7 +385,7 @@ class MidiPlayerPanel(
     private fun guard(): Boolean {
         val pl = playlist ?: return false
         if (!canPlay()) { status("⏳ SC-55 초기화 중… 잠시 후 다시 눌러주세요"); return false }
-        if (pl.files.isEmpty()) { status("⚠️ 재생할 MIDI 파일이 없습니다 — 📂로 폴더를 선택하세요"); return false }
+        if (pl.files.isEmpty()) { status("⚠️ 재생할 MIDI 파일이 없습니다 — 📂로 폴더를 선택하거나 📋에 곡을 담으세요"); return false }
         ensureAudioFocus()
         return true
     }
@@ -362,7 +394,7 @@ class MidiPlayerPanel(
         File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "midi")
 
     private fun titleOf(pl: MidiPlaylist, i: Int, f: File): String =
-        "${i + 1}/${pl.files.size}  ${f.nameWithoutExtension}"
+        "${if (playingFromPlaylist) "📋 " else ""}${i + 1}/${pl.files.size}  ${f.nameWithoutExtension}"
 
     private fun fmt(ms: Long): String {
         val s = (ms / 1000L).coerceAtLeast(0L)
@@ -392,9 +424,64 @@ class MidiPlayerPanel(
         updateMediaSessionState()
     }
 
+    // ── 플레이리스트 연동 ───────────────────────────────────────────────────────────────────────
+
+    private fun showPlaylist() {
+        if (playlist == null) return
+        plDialog?.dismiss()
+        plDialog = PlaylistDialog(activity, store, plHost).also { it.show() }
+    }
+
+    /** 저장된 플레이리스트를 재생 목록으로 삼는다 (재생은 시작하지 않음). store가 비어 있지 않을 때만 부른다. */
+    private fun loadPlaylist(startFile: File?) {
+        val pl = playlist ?: return
+        val items = store.items
+        if (items.isEmpty()) return
+        playingFromPlaylist = true
+        prefs.edit().putString(KEY_SRC, SRC_PLAYLIST).apply()
+        val idx = if (startFile != null) items.indexOfFirst { it.absolutePath == startFile.absolutePath }.coerceAtLeast(0) else 0
+        pl.setQueue(items, idx)
+        tvTitle.text = titleOf(pl, idx, items[idx])
+        status("📋 플레이리스트 ${items.size}곡 준비됨  (▶ 로 재생)")
+    }
+
+    /** 플레이리스트 화면에서 곡을 눌렀을 때: 재생 목록을 플레이리스트로 바꾸고 그 곡부터 재생. */
+    private fun playFromPlaylist(i: Int) {
+        val pl = playlist ?: return
+        val items = store.items
+        if (i !in items.indices) return
+        if (!canPlay()) { status("⏳ SC-55 초기화 중… 잠시 후 다시 눌러주세요"); return }
+        ensureAudioFocus()
+        if (!playingFromPlaylist) {
+            playingFromPlaylist = true
+            prefs.edit().putString(KEY_SRC, SRC_PLAYLIST).apply()
+            pl.setQueue(items, i)
+        }
+        pl.playIndex(i)
+        refresh()
+    }
+
+    /**
+     * 플레이리스트가 편집됐을 때: 지금 재생 목록이 플레이리스트인 경우에만 소리를 끊지 않고 맞춘다.
+     * (폴더를 재생 중이면 플레이리스트를 고쳐도 재생에는 영향이 없다.)
+     */
+    private fun syncPlaylistEdit() {
+        val pl = playlist ?: return
+        if (!playingFromPlaylist) return
+        pl.updateQueue(store.items)
+        val f = pl.files.getOrNull(pl.index)
+        val title = if (f != null) titleOf(pl, pl.index, f) else "플레이리스트 비어 있음"
+        tvTitle.text = title
+        currentTrackTitle = title
+        updateMediaMetadata()
+        refresh()
+    }
+
     /** 폴더를 재생 목록으로 삼는다. startFile이 있으면 그 곡부터(목록 안의 위치), play=true면 바로 재생. */
     private fun loadFolder(dir: File, startFile: File?, play: Boolean) {
         val pl = playlist ?: return
+        playingFromPlaylist = false
+        prefs.edit().putString(KEY_SRC, SRC_FOLDER).apply()
         if (!dir.exists()) dir.mkdirs()
         currentDir = dir
         prefs.edit().putString(KEY_DIR, dir.absolutePath).apply()

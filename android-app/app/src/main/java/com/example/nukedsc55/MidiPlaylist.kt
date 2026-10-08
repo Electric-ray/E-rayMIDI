@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicInteger
 /** 곡이 끝났을 때 무엇을 할지 (UI의 모드 버튼이 순서대로 돌린다). */
 enum class PlayMode(val label: String) {
     SINGLE("➡ 1곡"),            // 고른 곡 1곡만 재생하고 멈춤
-    FOLDER("⇒ 폴더 전체"),       // 고른 곡부터 폴더 끝까지 순서대로 재생하고 멈춤
-    LOOP_FOLDER("🔁 폴더 반복"), // 폴더 전체를 계속 반복
+    FOLDER("⇒ 목록 전체"),       // 고른 곡부터 목록(폴더 또는 플레이리스트) 끝까지 순서대로 재생하고 멈춤
+    LOOP_FOLDER("🔁 목록 반복"), // 목록 전체를 계속 반복
     LOOP_ONE("🔂 1곡 반복");     // 고른 곡만 계속 반복
 
     fun next(): PlayMode = values()[(ordinal + 1) % values().size]
@@ -88,6 +88,30 @@ class MidiPlaylist(private val player: MidiFilePlayer) {
         files = list
         index = if (list.isEmpty()) 0 else startIndex.coerceIn(0, list.size - 1)
         failStreak.set(0)
+    }
+
+    /**
+     * 재생을 끊지 않고 목록만 바꾼다 (플레이리스트 편집: 추가/삭제/순서 변경/비우기용).
+     * 지금 곡이 새 목록에 남아 있으면 index만 그 위치로 맞추고 소리는 그대로 이어진다.
+     * 지금 곡이 목록에서 빠졌으면 같은 자리에 온 곡(= 다음 곡)으로 넘어간다 — 재생/일시정지 중이었을 때만 재생하고,
+     * 목록이 비면 정지한다. 같은 곡은 목록에 한 번만 들어간다는 전제로 경로(absolutePath)로 현재 곡을 찾는다.
+     */
+    fun updateQueue(newList: List<File>) {
+        val cur = files.getOrNull(index)
+        val wasActive = player.state != MidiFilePlayer.State.STOPPED
+        files = newList
+        if (newList.isEmpty()) {
+            stop()
+            index = 0
+            return
+        }
+        val pos = if (cur == null) -1 else newList.indexOfFirst { it.absolutePath == cur.absolutePath }
+        if (pos >= 0) {
+            index = pos
+            return
+        }
+        index = index.coerceIn(0, newList.size - 1)
+        if (wasActive) playIndex(index) else onTrackChanged?.invoke(index, newList[index])
     }
 
     /** ▶/⏸ 버튼: 재생 중이면 일시정지, 일시정지면 이어서, 정지 상태면 현재 곡을 처음부터. */

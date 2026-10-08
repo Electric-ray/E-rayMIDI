@@ -2,6 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:id="@+id/rootLayout"
     android:background="@drawable/bg_rack_panel"
     android:orientation="vertical"
     android:padding="8dp">
@@ -10,6 +11,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:id="@+id/titleBar"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingBottom="6dp">
@@ -18,7 +20,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="E-rayMIDI v1.9"
+            android:text="E-rayMIDI v1.91"
             android:textColor="#e0e0ff"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -42,7 +44,8 @@
 
         <!-- 왼쪽: MODE (재생 엔진 선택) -->
         <LinearLayout
-            android:layout_width="98dp"
+            android:id="@+id/colMode"
+            android:layout_width="109dp"
             android:layout_height="match_parent"
             android:layout_marginEnd="6dp"
             android:background="@drawable/bg_module"
@@ -160,6 +163,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
+                android:id="@+id/lcdBezel"
                 android:background="@drawable/bg_lcd_bezel"
                 android:padding="5dp">
 
@@ -203,10 +207,26 @@
                     android:id="@+id/mu2000LcdView"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:visibility="gone" />            </FrameLayout>
+                    android:visibility="gone" />
+
+                <!-- 전체화면 전환 버튼: 베젤 오른쪽 위 모서리에 얹힌다. 전체화면에서도 그대로 남아 다시 누르면 원래 레이아웃으로 복귀 -->
+                <ImageButton
+                    android:id="@+id/btnLcdFullscreen"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_gravity="top|end"
+                    android:layout_margin="6dp"
+                    android:alpha="0.7"
+                    android:background="@drawable/bg_lcd_fs_btn"
+                    android:contentDescription="LCD 전체화면"
+                    android:padding="8dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_fullscreen" />
+            </FrameLayout>
 
             <!-- 상태 로그 + ROM 상태: 좌우 배치 (표시 정보량에 비해 세로로 쌓으면 폭이 너무 넓었음) -->
             <LinearLayout
+                android:id="@+id/statusRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
@@ -339,7 +359,8 @@
 
         <!-- 오른쪽: LINK (연결 방식) + 실행 버튼 -->
         <LinearLayout
-            android:layout_width="132dp"
+            android:id="@+id/colLink"
+            android:layout_width="117dp"
             android:layout_height="match_parent"
             android:layout_marginStart="6dp"
             android:background="@drawable/bg_module"
@@ -537,6 +558,22 @@
                 android:textSize="12sp" />
 
             <Button
+                android:id="@+id/btnPlaylist"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:layout_marginStart="3dp"
+                android:background="@drawable/btn_physical_neutral"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="8dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="0dp"
+                android:text="📋"
+                android:textColor="#ccccdd"
+                android:textSize="12sp" />
+
+            <Button
                 android:id="@+id/btnTrackPrev"
                 android:layout_width="wrap_content"
                 android:layout_height="28dp"
@@ -612,7 +649,7 @@
                 android:paddingTop="0dp"
                 android:paddingEnd="6dp"
                 android:paddingBottom="0dp"
-                android:text="⇒ 폴더 전체"
+                android:text="⇒ 목록 전체"
                 android:textColor="#ccccdd"
                 android:textSize="9sp" />
 
