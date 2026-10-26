@@ -219,7 +219,7 @@ public:
 			if (word(DRUM_ICON) != 0x000e)
 				return false;
 			for (int y = 0; y < 16; y++)
-				rows[y] = word(DRUM_ICON + u32(y) * 2) & 0xfffe;
+				rows[y] = word(DRUM_ICON + u32(y) * 2);
 			return true;
 		}
 		if (rec < VOICES || rec + 16 > VOICES_END)
@@ -246,7 +246,7 @@ public:
 			if (word(DRUM_ICON) != 0x000e)
 				return false;                              // 版が違う
 			for (int y = 0; y < 16; y++)
-				rows[y] = word(DRUM_ICON + u32(y) * 2) & 0xfffe;
+				rows[y] = word(DRUM_ICON + u32(y) * 2);
 			return true;
 		}
 		const u32 rec = record(part_ram);

@@ -338,6 +338,16 @@ LCD 하드웨어가 없는 엔진이나 1줄 문자 LCD는 별도 네이티브 �
   `b26bfa5`(2026-10-03) 시점입니다. 우리가 직접 수정한 업스트림 파일은 88lib의
   `c_interface.h/.cpp`, `hardwareDevice.h/.cpp`뿐이니 88lib를 갱신하면 이 네 파일의 변경을
   다시 적용해야 합니다.
+- **(v1.91) 위 기준 위에 업스트림 수정을 선별해서 얹어 두었습니다** (통째 갱신 아님). 다시 갱신할 때
+  이미 들어 있는 것: gearmulator `dbdda8ad`(la32), `04b5394d`+`31158a96`(xp.cpp),
+  `c41eb8d3`+`ba91985f`(sc88_submcu), `df1f778d`(deviceModel.h/romRegistry.h의 SC-55st 부분만),
+  S-MU2000 `a41fe09`(mu2000.cpp의 `draw_voice_fields`와 voices.h의 `& 0xfffe` 제거 2곳만).
+  `la32.*`, `xp.cpp`, `sc88_submcu.*`는 업스트림 최신본 그대로라서 그대로 덮어써도 되지만,
+  `deviceModel.h`/`romRegistry.h`/`mu2000.cpp`/`voices.h`는 일부만 반영한 상태이므로 통째로
+  덮어쓰기 전에 이 부분이 포함되는지 확인하세요. 안 가져온 것: 새 기종(SC-880/SK-88/MV-30),
+  SC-8820 CPU ROM(`4bdb7527`), S-MU2000 스레드 모드 수정(`5df0de8`, `7e6ebab`).
+- 벤더링 파일은 CRLF로 저장되어 있습니다. 패치를 `git apply`로 적용할 때는 LF로 바꿔 적용한 뒤
+  CRLF로 되돌리세요.
 - **헤더가 바뀌는 벤더링 소스를 갱신한 뒤에는 반드시 전체 재빌드(또는 파일 수정 시각 갱신)를
   하세요.** `git archive`/`git checkout`으로 가져온 파일은 수정 시각이 커밋 시각이라, 이미 만들어
   둔 오브젝트보다 "오래된" 것으로 보여 증분 빌드(Ninja)가 의존하는 소스를 다시 컴파일하지

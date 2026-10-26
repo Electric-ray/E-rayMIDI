@@ -2476,7 +2476,9 @@ void mu2000::draw_voice_fields()
 	}
 	// **絵は 16 行 × 16 ビットを左から 5 ビットずつ**（6.190）。
 	// 外字 0・1・2 が上半分（行 0-7）、4・5・6 が下半分（行 8-15）。
-	// いちばん右の 1 列（bit0）は出さない
+	// いちばん右の 1 列（bit0）は、その隣の外字 3・7 の bit4（issue #192。firmware と同じ置き場）。
+	// 外字 3・7 の残りの 4 ビットは決まった形のセグメントの点け消しで firmware の持ち物なので、
+	// そこは触らず、こちらの持ち物にもしない（firmware があとから同じ値を書く）
 	for (int y = 0; y < 16; y++) {
 		if (m_vf_icon[y] == ico[y]) {
 			for (int c = 0; c < 3; c++)
@@ -2489,6 +2491,8 @@ void mu2000::draw_voice_fields()
 			m_lcd.set_cg_owned(at, true);
 			m_lcd.poke_cgram(at, u8((ico[y] >> (11 - c * 5)) & 0x1f));
 		}
+		const u32 edge = u32((y < 8 ? 3 : 7) * 8 + (y & 7));
+		m_lcd.poke_cgram(edge, u8((m_lcd.cgram()[edge] & 0x0f) | ((ico[y] & 1) << 4)));
 	}
 }
 
